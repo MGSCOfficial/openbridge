@@ -1,0 +1,20 @@
+{
+  "name": "openbridge-mcp",
+  "version": "1.0.0",
+  "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "openbridge-mcp": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test:p01": "node test/test-p01.js",
+    "test:p02": "node test/test-p02.js",
+    "check": "node --check src/config.js && node --check src/server-manager.js && node --check src/client.js && node --check src/tools.js && node --check src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^3.24.2"
+  }
+}
