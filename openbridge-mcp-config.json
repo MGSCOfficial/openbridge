@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "openbridge": {
+      "command": "node",
+      "args": [
+        "C:/Users/MGSCO/.gemini/antigravity/scratch/openbridge/src/index.js"
+      ]
+    }
+  }
+}
