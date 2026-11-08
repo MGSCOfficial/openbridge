@@ -1,7 +1,7 @@
 {
   "name": "openbridge-mcp",
-  "version": "1.0.0",
-  "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models",
+  "version": "1.1.0",
+  "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models with Real-Time SSE and Multi-Agent Swarms",
   "main": "src/index.js",
   "type": "module",
   "bin": {
@@ -11,7 +11,9 @@
     "start": "node src/index.js",
     "test:p01": "node test/test-p01.js",
     "test:p02": "node test/test-p02.js",
-    "check": "node --check src/config.js && node --check src/server-manager.js && node --check src/client.js && node --check src/tools.js && node --check src/index.js"
+    "test:latency": "node test/test-sse-latency.js",
+    "test:swarm": "node test/test-swarm-parallel.js",
+    "check": "node --check src/config.js && node --check src/server-manager.js && node --check src/event-stream.js && node --check src/sandbox-manager.js && node --check src/job-manager.js && node --check src/client.js && node --check src/tools.js && node --check src/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",

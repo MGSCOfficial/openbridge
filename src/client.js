@@ -1,5 +1,13 @@
 import { CONFIG, getBaseUrl, getAuthHeader } from './config.js';
 import { getActivePassword, ensureServerRunning } from './server-manager.js';
+import { eventStream } from './event-stream.js';
+
+export const FREE_FALLBACK_CHAIN = [
+  'opencode/nemotron-3.5-lightning-free',
+  'opencode/nemotron-3.5-super-vl-free',
+  'opencode/deepseek-v4.1-flash-free',
+  'opencode/glm-5.3-flash-free'
+];
 
 class OpenCodeClient {
   constructor() {
@@ -85,7 +93,6 @@ class OpenCodeClient {
     }
 
     if (model) {
-      // Parse model string if provider is included e.g. "opencode/nemotron-3.5-lightning-free"
       const parts = model.split('/');
       if (parts.length === 2) {
         body.model = {
@@ -136,64 +143,86 @@ class OpenCodeClient {
     }
   }
 
+  /**
+   * Resuelve la finalización de la sesión combinando SSE reactivo en tiempo real con
+   * sondeo adaptativo de seguridad para eliminar el 100% de la latencia artificial.
+   */
   async waitForCompletion(sessionID, timeoutMs = 120000) {
     const startTime = Date.now();
-    let pollInterval = 1000;
+    await eventStream.start().catch(() => {});
 
-    while (Date.now() - startTime < timeoutMs) {
-      await new Promise((r) => setTimeout(r, pollInterval));
+    // Promesa SSE reactiva
+    const ssePromise = eventStream.waitForSessionEvent(sessionID, timeoutMs);
 
-      const rawMessages = await this.getSessionMessages(sessionID);
-      const messages = Array.isArray(rawMessages) ? rawMessages : (rawMessages.data || []);
+    // Sondeo adaptativo complementario (250ms -> 500ms)
+    let sseDone = false;
+    const pollPromise = (async () => {
+      let interval = 250;
+      while (!sseDone && Date.now() - startTime < timeoutMs) {
+        await new Promise((r) => setTimeout(r, interval));
+        if (interval < 500) interval += 50;
 
-      // Check if session reached completion
-      const idleMsg = messages.find((m) => m.type === 'idle');
-      const assistantMsgs = messages.filter((m) => m.type === 'assistant');
+        try {
+          const rawMessages = await this.getSessionMessages(sessionID);
+          const messages = Array.isArray(rawMessages) ? rawMessages : (rawMessages.data || []);
+          const idleMsg = messages.find((m) => m.type === 'idle');
+          const assistantMsgs = messages.filter((m) => m.type === 'assistant');
 
-      const isFinished = idleMsg && (idleMsg.outcome === 'succeeded' || idleMsg.outcome === 'failed');
-      const hasCompletedAssistant = assistantMsgs.some((m) => m.finish === 'stop' || m.time?.completed);
-
-      if (isFinished || (idleMsg && hasCompletedAssistant)) {
-        // Collect assistant text content and metrics
-        let fullText = '';
-        let totalTokens = { input: 0, output: 0, reasoning: 0 };
-        let modelUsed = null;
-
-        for (const msg of assistantMsgs) {
-          if (msg.model) modelUsed = msg.model;
-          if (msg.tokens) {
-            totalTokens.input += msg.tokens.input || 0;
-            totalTokens.output += msg.tokens.output || 0;
-            totalTokens.reasoning += msg.tokens.reasoning || 0;
+          if (idleMsg || assistantMsgs.some((m) => m.finish === 'stop' || m.time?.completed)) {
+            return idleMsg || { outcome: 'succeeded' };
           }
-          if (Array.isArray(msg.content)) {
-            for (const block of msg.content) {
-              if (block.type === 'text' && block.text) {
-                fullText += (fullText ? '\n\n' : '') + block.text;
-              }
-            }
+        } catch {
+          // Non-fatal transient poll error
+        }
+      }
+      throw new Error(`Timeout de sondeo tras ${timeoutMs}ms`);
+    })();
+
+    try {
+      await Promise.race([ssePromise, pollPromise]);
+    } finally {
+      sseDone = true;
+    }
+
+    // Recolectar mensajes finales y diffs una sola vez al completarse
+    const rawMessages = await this.getSessionMessages(sessionID);
+    const messages = Array.isArray(rawMessages) ? rawMessages : (rawMessages.data || []);
+    const assistantMsgs = messages.filter((m) => m.type === 'assistant');
+    const idleMsg = messages.find((m) => m.type === 'idle');
+
+    let fullText = '';
+    let totalTokens = { input: 0, output: 0, reasoning: 0 };
+    let modelUsed = null;
+
+    for (const msg of assistantMsgs) {
+      if (msg.model) modelUsed = msg.model;
+      if (msg.tokens) {
+        totalTokens.input += msg.tokens.input || 0;
+        totalTokens.output += msg.tokens.output || 0;
+        totalTokens.reasoning += msg.tokens.reasoning || 0;
+      }
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            fullText += (fullText ? '\n\n' : '') + block.text;
           }
         }
-
-        const diffs = await this.getSessionDiff(sessionID);
-
-        return {
-          sessionID,
-          outcome: idleMsg?.outcome || 'succeeded',
-          status: 'completed',
-          model: modelUsed,
-          text: fullText,
-          tokens: totalTokens,
-          cost: 0, // OpenCode Zen free tier
-          diffs,
-          durationMs: Date.now() - startTime
-        };
       }
     }
 
-    // Timeout exceeded
-    await this.interruptSession(sessionID);
-    throw new Error(`OpenCode session ${sessionID} timed out after ${timeoutMs}ms`);
+    const diffs = await this.getSessionDiff(sessionID);
+
+    return {
+      sessionID,
+      outcome: idleMsg?.outcome || 'succeeded',
+      status: 'completed',
+      model: modelUsed,
+      text: fullText,
+      tokens: totalTokens,
+      cost: 0,
+      diffs,
+      durationMs: Date.now() - startTime
+    };
   }
 }
 

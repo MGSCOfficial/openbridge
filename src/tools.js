@@ -2,15 +2,17 @@ import { z } from 'zod';
 import { client } from './client.js';
 import { CONFIG } from './config.js';
 import { checkServerAuth } from './server-manager.js';
+import { jobManager } from './job-manager.js';
+import { createSandbox, cleanupSandbox } from './sandbox-manager.js';
 
 export const TOOLS = [
   {
     name: 'openbridge_list_models',
-    description: 'Lista los modelos de IA disponibles a través de OpenCode Zen y OpenRouter, indicando cuáles son 100% gratuitos (como NVIDIA Nemotron 3.5 Lightning Free, Super VL Free, Gemma o DeepSeek Flash).',
+    description: 'Lista los modelos de IA disponibles a traves de OpenCode Zen y OpenRouter, indicando modelos 100% gratuitos (como NVIDIA Nemotron 3.5 Lightning Free, Super VL Free, Gemma o DeepSeek Flash).',
     parameters: z.object({
       provider: z.enum(['all', 'opencode', 'openrouter']).optional().default('all').describe('Filtrar por proveedor'),
-      free_only: z.boolean().optional().default(true).describe('Mostrar únicamente modelos gratuitos (Coste $0)'),
-      search: z.string().optional().default('').describe('Término de búsqueda opcional (ej. nemotron, gemma, flash)')
+      free_only: z.boolean().optional().default(true).describe('Mostrar unicamente modelos gratuitos con coste $0'),
+      search: z.string().optional().default('').describe('Termino de busqueda opcional (ej. nemotron, gemma, flash)')
     }),
     execute: async (args) => {
       const models = await client.listModels(args);
@@ -22,52 +24,104 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_delegate_task',
-    description: 'Delega una tarea de programación, escaneo o pruebas a un modelo de OpenCode Zen (ej. NVIDIA Nemotron 3.5) de forma asíncrona y estructurada, ahorrando cuota de Gemini en Antigravity.',
+    description: 'Delega una tarea de programacion de forma sincrona a un modelo de OpenCode Zen (ej. NVIDIA Nemotron 3.5) esperando la respuesta con latencia minima via SSE.',
     parameters: z.object({
-      task: z.string().describe('Instrucción detallada de la tarea que debe realizar el worker externo'),
+      task: z.string().describe('Instruccion detallada de la tarea que debe realizar el worker externo'),
       model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free)'),
-      working_dir: z.string().optional().describe('Directorio absoluto de trabajo sobre el que debe operar OpenCode. Si se omite, opera en modo de análisis aislado.'),
-      read_only: z.boolean().optional().default(false).describe('Si es true, le indica al modelo no alterar archivos en disco y devolver únicamente el análisis o código sugerido.'),
-      timeout_seconds: z.number().optional().default(120).describe('Tiempo máximo de espera en segundos')
+      working_dir: z.string().optional().describe('Directorio absoluto de trabajo sobre el que debe operar OpenCode. Si se omite y read_only es true, utiliza un sandbox efimero ultraligero.'),
+      read_only: z.boolean().optional().default(false).describe('Si es true, le indica al modelo devolver analisis o codigo en texto plano sin tocar archivos en disco.'),
+      timeout_seconds: z.number().optional().default(120).describe('Tiempo maximo de espera en segundos')
     }),
     execute: async (args) => {
       let promptText = args.task;
-      if (args.read_only) {
-        promptText = `[MODO SOLO LECTURA: NO MODIFIQUES NI CREES ARCHIVOS EN DISCO. DEVUELVE TU SOLUCIÓN, CÓDIGO O ANÁLISIS EN TEXTO PLANO DENTRO DE TU RESPUESTA]\n\n${args.task}`;
+      let sandboxDir = null;
+      let effectiveDir = args.working_dir || null;
+
+      if (args.read_only && !effectiveDir) {
+        sandboxDir = createSandbox(`sync_${Date.now()}`);
+        effectiveDir = sandboxDir;
+        promptText = `[MODO SOLO LECTURA: NO MODIFIQUES NI CREES ARCHIVOS EN DISCO. DEVUELVE TU SOLUCION, CODIGO O ANALISIS EN TEXTO PLANO DENTRO DE TU RESPUESTA]\n\n${args.task}`;
       }
 
-      // 1. Create session
-      const sessionID = await client.createSession({
-        title: `openbridge-${Date.now()}`,
-        model: args.model || CONFIG.defaultModel,
-        directory: args.working_dir || null
-      });
+      try {
+        const sessionID = await client.createSession({
+          title: `openbridge-sync-${Date.now()}`,
+          model: args.model || CONFIG.defaultModel,
+          directory: effectiveDir
+        });
 
-      // 2. Dispatch prompt
-      await client.sendPrompt(sessionID, promptText);
+        await client.sendPrompt(sessionID, promptText);
 
-      // 3. Await completion
-      const timeoutMs = (args.timeout_seconds || 120) * 1000;
-      const result = await client.waitForCompletion(sessionID, timeoutMs);
+        const timeoutMs = (args.timeout_seconds || 120) * 1000;
+        const result = await client.waitForCompletion(sessionID, timeoutMs);
 
-      return {
-        sessionID: result.sessionID,
-        outcome: result.outcome,
-        modelUsed: result.model?.id || args.model,
-        tokens: result.tokens,
-        costUsd: 0,
-        quotaSaved: '100% Gemini Quota Offloaded',
-        response: result.text,
-        diffs: result.diffs,
-        durationSeconds: Math.round(result.durationMs / 1000)
-      };
+        return {
+          sessionID: result.sessionID,
+          outcome: result.outcome,
+          modelUsed: result.model?.id || args.model,
+          tokens: result.tokens,
+          costUsd: 0,
+          geminiQuotaSaved: '100%',
+          response: result.text,
+          diffs: result.diffs,
+          durationSeconds: Math.round(result.durationMs / 1000)
+        };
+      } finally {
+        if (sandboxDir) {
+          cleanupSandbox(sandboxDir);
+        }
+      }
+    }
+  },
+  {
+    name: 'openbridge_start_task',
+    description: 'DISPARO ASINCRONO MULTIAGENTE: Inicia una tarea en background y retorna un task_id de inmediato (<50ms) sin bloquear a Antigravity, permitiendo lanzar enjambres de modelos en paralelo.',
+    parameters: z.object({
+      task: z.string().describe('Instruccion tecnica detallada para el worker externo'),
+      model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free, opencode/deepseek-v4.1-flash-free)'),
+      working_dir: z.string().optional().describe('Directorio absoluto de trabajo. Si se omite, opera en sandbox aislado.'),
+      read_only: z.boolean().optional().default(false).describe('Si es true, no altera archivos en disco y reduce el consumo de tokens al minimo.'),
+      timeout_seconds: z.number().optional().default(120).describe('Tiempo maximo de espera en segundos')
+    }),
+    execute: async (args) => {
+      return jobManager.startJob(args);
+    }
+  },
+  {
+    name: 'openbridge_check_task',
+    description: 'Comprueba el estado de una tarea asincrona previa lanzada con openbridge_start_task y recolecta el resultado cuando este completada.',
+    parameters: z.object({
+      task_id: z.string().describe('Identificador unico de la tarea (ej. job_xxxxxxxx)')
+    }),
+    execute: async (args) => {
+      return jobManager.getJob(args.task_id);
+    }
+  },
+  {
+    name: 'openbridge_cancel_task',
+    description: 'Cancela e interrumpe de forma limpia una tarea asincrona en curso.',
+    parameters: z.object({
+      task_id: z.string().describe('Identificador de la tarea a cancelar')
+    }),
+    execute: async (args) => {
+      return jobManager.cancelJob(args.task_id);
+    }
+  },
+  {
+    name: 'openbridge_list_active_tasks',
+    description: 'Lista todas las tareas asincronas activas o recientes en el gestor de enjambres de OpenBridge.',
+    parameters: z.object({
+      limit: z.number().optional().default(20).describe('Cantidad maxima de tareas a listar')
+    }),
+    execute: async (args) => {
+      return jobManager.listJobs(args.limit);
     }
   },
   {
     name: 'openbridge_get_diff',
-    description: 'Recupera los diffs de Git o archivos generados durante una sesión delegada previa en OpenCode.',
+    description: 'Recupera los diffs de Git o archivos generados durante una sesion previa en OpenCode.',
     parameters: z.object({
-      session_id: z.string().describe('ID de la sesión de OpenCode')
+      session_id: z.string().describe('ID de la sesion de OpenCode')
     }),
     execute: async (args) => {
       const diffs = await client.getSessionDiff(args.session_id);
@@ -79,7 +133,7 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_status',
-    description: 'Verifica el estado del daemon local de OpenCode, la conectividad y la configuración de autenticación.',
+    description: 'Verifica el estado del daemon local de OpenCode, la conectividad y el transporte SSE.',
     parameters: z.object({}),
     execute: async () => {
       const auth = await checkServerAuth();

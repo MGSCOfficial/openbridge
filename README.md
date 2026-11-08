@@ -1,50 +1,44 @@
-# OpenBridge
+# OpenBridge (v1.1)
 
-**OpenBridge** es un puente agéntico de doble capa (Servidor MCP + Skill de Gobernanza) para **Google Antigravity** que permite orquestar y delegar tareas de código concurrentes a modelos gratuitos de **OpenCode Zen / Free Tier** (con foco en **NVIDIA Nemotron 3.5 Lightning Free** y **Super VL Free**) a través de su API REST local (`opencode serve`).
-
----
-
-## Características Principales
-
-* ⚡ **Ahorro de Cuota del 100%**: Descarga tareas mecánicas de alto volumen de tokens (tests, boilerplate, escaneo) a modelos gratuitos a coste $0.
-* 🤖 **NVIDIA Nemotron 3.5 Out-of-the-Box**: Conexión directa a `opencode/nemotron-3.5-lightning-free` y `opencode/nemotron-3.5-super-vl-free` sin necesidad de API keys o saldo en OpenRouter.
-* 🔌 **Protocolo MCP Estándar**: Expone herramientas nativas (`openbridge_delegate_task`, `openbridge_list_models`, `openbridge_get_diff`, `openbridge_status`) compatibles con cualquier cliente MCP.
-* 🧠 **Skill de Gobernanza Antigravity**: Política de arbitraje cognitivo en `.agents/skills/openbridge-delegator/SKILL.md` que define cuándo retener tareas en Gemini 3.8 y cuándo derivar a Nemotron.
-* 🛡️ **Aislamiento y Auditoría de Diffs**: Modo de solo lectura o escritura acotada con recuperación de diffs unificados antes de commitear.
+**OpenBridge** es un puente agéntico de doble capa (Servidor MCP + Skill de Gobernanza) para **Google Antigravity** que permite orquestar y delegar tareas de código concurrentes a modelos gratuitos de **OpenCode Zen / Free Tier** (con foco en **NVIDIA Nemotron 3.5 Lightning Free**, **Super VL Free** y **DeepSeek V4.1 Flash**) a través de su API REST local (`opencode serve`) y bus de eventos SSE.
 
 ---
 
-## Estructura del Proyecto
+## Novedades de la Versión 1.1
 
-```text
-openbridge/
-├── package.json               # Configuración Node.js y dependencias (@modelcontextprotocol/sdk, zod)
-├── openbridge-mcp-config.json # Registro de MCP para Antigravity
-├── skills/
-│   └── openbridge-delegator/  # Skill de gobernanza y arbitraje
-│       └── SKILL.md
-├── src/
-│   ├── config.js              # Variables de entorno y rutas seguras en Windows
-│   ├── server-manager.js      # Verificación y auto-spawn del daemon OpenCode
-│   ├── client.js              # Cliente HTTP REST para la API de OpenCode
-│   ├── tools.js               # Definición y esquemas Zod de herramientas
-│   └── index.js               # Servidor MCP stdio
-└── test/
-    ├── test-p01.js            # Smoke test del daemon y autenticación
-    └── test-p02.js            # Smoke test de delegación a Nemotron 3.5
-```
+* ⚡ **Streaming en Tiempo Real vía SSE**: Conexión reactiva a `/api/event` que elimina el sondeo HTTP y captura respuestas con latencia mínima (0s de retardo artificial).
+* 🚀 **Enjambres Multiagente Asíncronos (*Job Queue*)**:
+  - `openbridge_start_task`: Disparo en background no bloqueante (<50ms).
+  - `openbridge_check_task`: Consulta de estado y recolección de resultados.
+  - `openbridge_cancel_task`: Interrupción controlada de workers.
+  - `openbridge_list_active_tasks`: Visualización de tareas en vuelo.
+* 🛡️ **Sandbox Efímero Ligero**: Aislamiento temporal de carpetas para evitar escaneos pesados de repositorios en modo `read_only`.
+* 🤖 **Soporte Multi-Modelo Concurrente Verificado**: Capacidad demostrada para correr 3 modelos simultáneos (`Nemotron 3.5 Lightning`, `Nemotron 3.5 Super VL`, `DeepSeek V4.1 Flash`) en paralelo a coste $0 y con 0% de impacto en la cuota de Gemini.
 
 ---
 
-## Verificación de Pruebas
+## Herramientas MCP Disponibles
+
+1. `openbridge_start_task` (Asíncrona no bloqueante para enjambres)
+2. `openbridge_check_task` (Consulta de resultados por `task_id`)
+3. `openbridge_cancel_task` (Interrupción de tareas)
+4. `openbridge_list_active_tasks` (Tablero de workers)
+5. `openbridge_delegate_task` (Síncrona directa con SSE)
+6. `openbridge_list_models` (Catálogo de 22 modelos gratuitos)
+7. `openbridge_get_diff` (Inspección de parches de código)
+8. `openbridge_status` (Diagnóstico del daemon)
+
+---
+
+## Verificación de la Suite
 
 ```powershell
 # Comprobación sintáctica nativa
 npm.cmd run check
 
-# Prueba de humo del Daemon
-npm.cmd run test:p01
+# Prueba de latencia SSE
+npm.cmd run test:latency
 
-# Prueba de humo de delegación real a Nemotron 3.5
-npm.cmd run test:p02
+# Prueba de enjambre multiagente en paralelo (3 modelos)
+npm.cmd run test:swarm
 ```
