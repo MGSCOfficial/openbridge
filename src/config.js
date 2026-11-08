@@ -34,11 +34,11 @@ function resolveCliPath() {
 export const CONFIG = {
   port: parseInt(process.env.OPENCODE_PORT || '4096', 10),
   hostname: process.env.OPENCODE_HOST || '127.0.0.1',
-  defaultModel: process.env.OPENCODE_DEFAULT_MODEL || 'opencode/nemotron-3.5-lightning-free',
+  defaultModel: process.env.OPENCODE_DEFAULT_MODEL || 'opencode/nemotron-3.5-super-vl-free',
   multimodalModel: process.env.OPENCODE_MULTIMODAL_MODEL || 'opencode/nemotron-3.5-super-vl-free',
   serverUsername: process.env.OPENCODE_SERVER_USERNAME || 'opencode',
   serverPassword: process.env.OPENCODE_SERVER_PASSWORD || 'openbridge_local_token_2026',
-  requestTimeoutMs: parseInt(process.env.OPENCODE_TIMEOUT_MS || '180000', 10),
+  requestTimeoutMs: parseInt(process.env.OPENCODE_TIMEOUT_MS || '600000', 10),
   cliPath: resolveCliPath()
 };
 

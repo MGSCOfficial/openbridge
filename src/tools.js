@@ -30,7 +30,7 @@ export const TOOLS = [
       model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free)'),
       working_dir: z.string().optional().describe('Directorio absoluto de trabajo sobre el que debe operar OpenCode. Si se omite y read_only es true, utiliza un sandbox efimero ultraligero.'),
       read_only: z.boolean().optional().default(false).describe('Si es true, le indica al modelo devolver analisis o codigo en texto plano sin tocar archivos en disco.'),
-      timeout_seconds: z.number().optional().default(120).describe('Tiempo maximo de espera en segundos')
+      timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo de espera en segundos')
     }),
     execute: async (args) => {
       let promptText = args.task;
@@ -52,7 +52,7 @@ export const TOOLS = [
 
         await client.sendPrompt(sessionID, promptText);
 
-        const timeoutMs = (args.timeout_seconds || 120) * 1000;
+        const timeoutMs = (args.timeout_seconds || 600) * 1000;
         const result = await client.waitForCompletion(sessionID, timeoutMs);
 
         return {
@@ -81,7 +81,7 @@ export const TOOLS = [
       model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free, opencode/deepseek-v4.1-flash-free)'),
       working_dir: z.string().optional().describe('Directorio absoluto de trabajo. Si se omite, opera en sandbox aislado.'),
       read_only: z.boolean().optional().default(false).describe('Si es true, no altera archivos en disco y reduce el consumo de tokens al minimo.'),
-      timeout_seconds: z.number().optional().default(120).describe('Tiempo maximo de espera en segundos')
+      timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo de espera en segundos')
     }),
     execute: async (args) => {
       return jobManager.startJob(args);
