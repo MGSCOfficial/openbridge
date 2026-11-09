@@ -76,7 +76,7 @@ El repositorio incluye 3 habilidades agénticas listas para instalar en `.agents
 
 ## 📋 Requisitos Previos
 
-1. **Node.js**: Versión `>= 18.0.0` (Probado en Node.js v24 LTS en Windows, Linux y macOS).
+1. **Node.js**: Versión `>= 18.0.0` (Probado en Node.js v24 LTS en Windows).
 2. **OpenCode CLI**: Motor satélite local instalado globalmente:
    ```bash
    npm install -g @opencode/cli
