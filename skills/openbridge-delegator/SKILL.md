@@ -5,6 +5,9 @@ description: Orquesta la delegación inteligente de tareas de código, pruebas u
 
 # OPENBRIDGE GOVERNANCE & TASK DELEGATION SKILL (v1.1)
 
+> 🔗 **Repositorio Oficial en GitHub**: [https://github.com/MGSCOfficial/openbridge](https://github.com/MGSCOfficial/openbridge)  
+> 👤 **Autor y Mantenedor**: MGSCO ([@MGSCOfficial](https://github.com/MGSCOfficial))
+
 Guía de gobernanza agéntica para la orquestación y delegación estratégica de tareas de código entre **Google Antigravity (Gemini 3.8)** y los modelos worker de **OpenCode Zen Free Tier** (con foco en **NVIDIA Nemotron 3.5 Lightning Free**, **Super VL Free** y **DeepSeek V4.1 Flash**) a través del servidor MCP `openbridge`.
 
 ---

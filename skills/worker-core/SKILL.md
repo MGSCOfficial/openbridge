@@ -5,6 +5,9 @@ description: Use when operating as an external worker in OpenCode to report prog
 
 # WORKER-CORE: PROTOCOLO UNIFICADO DE TRABAJADORES OPENCODE
 
+> 🔗 **Repositorio Oficial en GitHub**: [https://github.com/MGSCOfficial/openbridge](https://github.com/MGSCOfficial/openbridge)  
+> 👤 **Autor y Mantenedor**: MGSCO ([@MGSCOfficial](https://github.com/MGSCOfficial))
+
 Habilidad maestra consolidada para gobernar cualquier modelo en OpenCode Zen (DeepSeek, Nemotron Super VL, Gemma 4) que ejecute tareas bajo la supervisión de Google Antigravity (Gemini).
 
 ---

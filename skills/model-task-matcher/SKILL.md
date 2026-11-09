@@ -5,6 +5,9 @@ description: Use when determining which AI model, variant, provider order, and p
 
 # MODEL-TASK-MATCHER: ENRUTAMIENTO DETERMINISTA DE MODELOS DE IA
 
+> 🔗 **Repositorio Oficial en GitHub**: [https://github.com/MGSCOfficial/openbridge](https://github.com/MGSCOfficial/openbridge)  
+> 👤 **Autor y Mantenedor**: MGSCO ([@MGSCOfficial](https://github.com/MGSCOfficial))
+
 Sistema inteligente para analizar la naturaleza de una tarea de desarrollo y seleccionar con precisión el modelo de IA gratuito o de bajo costo más adecuado en el ecosistema OpenCode Zen / OpenRouter, evitando el desperdicio de tokens y fallos de ejecución.
 
 ---
