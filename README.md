@@ -9,6 +9,8 @@ Permite orquestar, disparar enjambres multi-modelo concurrentes y delegar tareas
 
 En otras Palabras es un MCP que permite que Google Antigravity Controle y coordine los modelos de inteligencia artificial que tengas disponibles en OpenCode
 
+Las Pruebas hechas hasta el momento han sido con los modelos gratuitos DeepSeek V4.1 Flash y NVIDIA Nemotron usando como proveedor a OpenCode y OpenRouter mediante Clave API
+
 ---
 
 ## 🎯 Arquitectura del Ecosistema
