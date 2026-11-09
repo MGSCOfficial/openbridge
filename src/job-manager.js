@@ -14,7 +14,7 @@ class JobManager {
       model = CONFIG.defaultModel,
       working_dir = null,
       read_only = false,
-      timeout_seconds = 120
+      timeout_seconds = 600
     } = options;
 
     const jobId = `job_${randomUUID().slice(0, 8)}`;
@@ -57,7 +57,7 @@ class JobManager {
     // 3. Track in background asynchronously (fire-and-forget for Antigravity)
     (async () => {
       try {
-        const timeoutMs = (timeout_seconds || 120) * 1000;
+        const timeoutMs = (timeout_seconds || 600) * 1000;
         const result = await client.waitForCompletion(sessionID, timeoutMs);
 
         job.status = 'COMPLETED';

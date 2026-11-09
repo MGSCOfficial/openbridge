@@ -93,17 +93,24 @@ class OpenCodeClient {
     }
 
     if (model) {
-      const parts = model.split('/');
-      if (parts.length === 2) {
+      if (model.startsWith('openrouter/')) {
         body.model = {
-          providerID: parts[0],
-          id: parts[1]
+          providerID: 'openrouter',
+          id: model.slice('openrouter/'.length)
         };
       } else {
-        body.model = {
-          providerID: 'opencode',
-          id: model
-        };
+        const parts = model.split('/');
+        if (parts.length === 2) {
+          body.model = {
+            providerID: parts[0],
+            id: parts[1]
+          };
+        } else {
+          body.model = {
+            providerID: 'opencode',
+            id: model
+          };
+        }
       }
     }
 
@@ -144,44 +151,29 @@ class OpenCodeClient {
   }
 
   /**
-   * Resuelve la finalización de la sesión combinando SSE reactivo en tiempo real con
-   * sondeo adaptativo de seguridad para eliminar el 100% de la latencia artificial.
+   * Resuelve la finalización de la sesión basándose en el estado determinista
+   * del ciclo de vida de OpenCode (session.time.idle >= session.time.busy).
    */
-  async waitForCompletion(sessionID, timeoutMs = 120000) {
+  async waitForCompletion(sessionID, timeoutMs = 600000) {
     const startTime = Date.now();
-    await eventStream.start().catch(() => {});
+    let interval = 500;
 
-    // Promesa SSE reactiva
-    const ssePromise = eventStream.waitForSessionEvent(sessionID, timeoutMs);
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise((r) => setTimeout(r, interval));
+      if (interval < 2000) interval += 250;
 
-    // Sondeo adaptativo complementario (250ms -> 500ms)
-    let sseDone = false;
-    const pollPromise = (async () => {
-      let interval = 250;
-      while (!sseDone && Date.now() - startTime < timeoutMs) {
-        await new Promise((r) => setTimeout(r, interval));
-        if (interval < 500) interval += 50;
-
-        try {
-          const rawMessages = await this.getSessionMessages(sessionID);
-          const messages = Array.isArray(rawMessages) ? rawMessages : (rawMessages.data || []);
-          const idleMsg = messages.find((m) => m.type === 'idle');
-          const assistantMsgs = messages.filter((m) => m.type === 'assistant');
-
-          if (idleMsg || assistantMsgs.some((m) => m.finish === 'stop' || m.time?.completed)) {
-            return idleMsg || { outcome: 'succeeded' };
-          }
-        } catch {
-          // Non-fatal transient poll error
+      try {
+        const session = await this.request(`/api/session/${sessionID}`);
+        if (session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy)) {
+          break;
         }
+      } catch {
+        // Non-fatal transient poll error
       }
-      throw new Error(`Timeout de sondeo tras ${timeoutMs}ms`);
-    })();
+    }
 
-    try {
-      await Promise.race([ssePromise, pollPromise]);
-    } finally {
-      sseDone = true;
+    if (Date.now() - startTime >= timeoutMs) {
+      throw new Error(`Timeout de espera tras ${timeoutMs}ms para sesión ${sessionID}`);
     }
 
     // Recolectar mensajes finales y diffs una sola vez al completarse

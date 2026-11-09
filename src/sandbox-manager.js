@@ -5,15 +5,15 @@ import os from 'node:os';
 const BASE_SANDBOX_DIR = path.join(os.tmpdir(), 'openbridge_sandboxes');
 
 export function createSandbox(sessionID) {
-  const dir = path.join(BASE_SANDBOX_DIR, sessionID);
+  const dir = path.isAbsolute(sessionID) ? sessionID : path.join(BASE_SANDBOX_DIR, sessionID);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   return dir;
 }
 
-export function cleanupSandbox(sessionID) {
-  const dir = path.join(BASE_SANDBOX_DIR, sessionID);
+export function cleanupSandbox(target) {
+  const dir = path.isAbsolute(target) ? target : path.join(BASE_SANDBOX_DIR, target);
   try {
     if (fs.existsSync(dir)) {
       fs.rmSync(dir, { recursive: true, force: true });
