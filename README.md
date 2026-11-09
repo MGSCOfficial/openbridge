@@ -5,7 +5,7 @@
 
 Puente agéntico de alto rendimiento bajo el protocolo **Model Context Protocol (MCP)** que conecta entornos de trabajo agénticos (como **Google Antigravity**) con clústeres locales y satélites de **OpenCode Zen / Free Tier**.
 
-Permite orquestar, disparar enjambres multi-modelo concurrentes y delegar tareas de código mecánicas a modelos con costo de inferencia **$0.00** (**NVIDIA Nemotron 3.5 Super VL**, **Nemotron 3.5 Lightning** y **DeepSeek V4.1 Flash**), preservando el 100% de la cuota de razonamiento de modelos principales como Gemini.
+Permite orquestar, disparar enjambres multi-modelo concurrentes y delegar tareas de código mecánicas a modelos como **NVIDIA Nemotron 3.5 Super VL**, **Nemotron 3.5 Lightning** y **DeepSeek V4.1 Flash**, rindiendo así la cuota de razonamiento de modelos principales como Gemini o involucrando a este.
 
 En otras Palabras es un MCP que permite que Google Antigravity Controle y coordine los modelos de inteligencia artificial que tengas disponibles en OpenCode
 
