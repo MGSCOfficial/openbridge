@@ -7,6 +7,7 @@ import { checkServerAuth, ensureServerRunning, stopSpawnedServer } from './serve
 import { jobManager } from './job-manager.js';
 import { createSandbox, cleanupSandbox } from './sandbox-manager.js';
 import { eventStream } from './event-stream.js';
+import { startDashboardServer, stopDashboardServer } from './dashboard.js';
 
 const server = new McpServer({
   name: 'openbridge-mcp',
@@ -279,17 +280,20 @@ server.tool(
 async function main() {
   await ensureServerRunning();
   await eventStream.start().catch(() => {});
+  startDashboardServer(CONFIG.dashboardPort);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
 process.on('SIGINT', () => {
+  stopDashboardServer();
   eventStream.stop();
   stopSpawnedServer();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
+  stopDashboardServer();
   eventStream.stop();
   stopSpawnedServer();
   process.exit(0);

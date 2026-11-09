@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { client } from './client.js';
 import { CONFIG } from './config.js';
 import { createSandbox, cleanupSandbox } from './sandbox-manager.js';
 
-class JobManager {
+class JobManager extends EventEmitter {
   constructor() {
+    super();
     this.jobs = new Map();
   }
 
@@ -50,6 +52,7 @@ class JobManager {
     };
 
     this.jobs.set(jobId, job);
+    this.emit('task_started', job);
 
     // 2. Dispatch prompt
     await client.sendPrompt(sessionID, promptText);
@@ -68,11 +71,13 @@ class JobManager {
         job.tokens = result.tokens;
         job.diffs = result.diffs || [];
         job.result = result.text;
+        this.emit('task_completed', job);
       } catch (err) {
         job.status = 'FAILED';
         job.completedAt = Date.now();
         job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
         job.error = err.message;
+        this.emit('task_failed', job);
       } finally {
         if (job.sandboxDir) {
           cleanupSandbox(jobId);

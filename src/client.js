@@ -151,30 +151,47 @@ class OpenCodeClient {
   }
 
   /**
-   * Resuelve la finalización de la sesión basándose en el estado determinista
-   * del ciclo de vida de OpenCode (session.time.idle >= session.time.busy).
+   * Resuelve la finalización de la sesión basándose en una estrategia Dual-Track:
+   * 1. Reactivo instantáneo vía SSE (eventStream) con latencia <50ms.
+   * 2. Sondeo determinista de respaldo (session.time.idle >= session.time.busy).
    */
   async waitForCompletion(sessionID, timeoutMs = 600000) {
     const startTime = Date.now();
-    let interval = 500;
 
-    while (Date.now() - startTime < timeoutMs) {
-      await new Promise((r) => setTimeout(r, interval));
-      if (interval < 2000) interval += 250;
-
-      try {
-        const session = await this.request(`/api/session/${sessionID}`);
-        if (session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy)) {
-          break;
+    // Vía 1: Reactiva mediante SSE
+    const ssePromise = new Promise((resolve) => {
+      const handler = (evt) => {
+        const type = evt?.type || '';
+        if (type.includes('idle') || type.includes('succeeded') || evt?.data?.outcome) {
+          eventStream.off(`session:${sessionID}`, handler);
+          resolve({ source: 'sse', data: evt });
         }
-      } catch {
-        // Non-fatal transient poll error
-      }
-    }
+      };
+      eventStream.on(`session:${sessionID}`, handler);
+      setTimeout(() => eventStream.off(`session:${sessionID}`, handler), timeoutMs);
+    });
 
-    if (Date.now() - startTime >= timeoutMs) {
+    // Vía 2: Sondeo determinista de respaldo
+    const pollPromise = (async () => {
+      let interval = 500;
+      while (Date.now() - startTime < timeoutMs) {
+        await new Promise((r) => setTimeout(r, interval));
+        if (interval < 2000) interval += 250;
+
+        try {
+          const session = await this.request(`/api/session/${sessionID}`);
+          if (session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy)) {
+            return { source: 'poll', session };
+          }
+        } catch {
+          // Error transitorio tolerado
+        }
+      }
       throw new Error(`Timeout de espera tras ${timeoutMs}ms para sesión ${sessionID}`);
-    }
+    })();
+
+    // El primero que certifique la finalización libera el flujo
+    await Promise.race([ssePromise, pollPromise]);
 
     // Recolectar mensajes finales y diffs una sola vez al completarse
     const rawMessages = await this.getSessionMessages(sessionID);

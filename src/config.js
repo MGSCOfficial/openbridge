@@ -39,6 +39,7 @@ export const CONFIG = {
   serverUsername: process.env.OPENCODE_SERVER_USERNAME || 'opencode',
   serverPassword: process.env.OPENCODE_SERVER_PASSWORD || 'openbridge_local_token_2026',
   requestTimeoutMs: parseInt(process.env.OPENCODE_TIMEOUT_MS || '600000', 10),
+  dashboardPort: parseInt(process.env.OPENBRIDGE_DASHBOARD_PORT || '4098', 10),
   cliPath: resolveCliPath()
 };
 
