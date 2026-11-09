@@ -1,7 +1,7 @@
 # OpenBridge MCP (v1.1.0-beta)
 
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
-> Este ecosistema se encuentra actualmente en **fase experimental de pruebas**. Algunas APIs satélites de terceros (como pools públicos compartidos de OpenRouter) pueden experimentar variaciones de cuota o rate-limits imprevistos. Este software se distribuye con fines de investigación, desarrollo y automatización de flujos agénticos avanzados. No representa un producto final cerrado.
+> Este ecosistema se encuentra actualmente en **fase experimental de pruebas**. Este software se distribuye con fines de investigación, desarrollo y automatización de flujos agénticos avanzados. No representa un producto final cerrado.
 
 Puente agéntico de alto rendimiento bajo el protocolo **Model Context Protocol (MCP)** que conecta entornos de trabajo agénticos (como **Google Antigravity**) con clústeres locales y satélites de **OpenCode Zen / Free Tier**.
 
