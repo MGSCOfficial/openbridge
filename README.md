@@ -74,6 +74,18 @@ El repositorio incluye 3 habilidades agénticas listas para instalar en `.agents
 
 ---
 
+## 🔗 Ecosistema y Habilidades Complementarias Recomendadas
+
+Para maximizar la potencia, orden y estabilidad de **OpenBridge**, se recomienda integrarlo junto a las siguientes habilidades del ecosistema:
+
+1. **[Antigravity Zen](https://github.com/MGSCOfficial/antigravity-zen)** 🧘:
+   * **Higiene Cognitiva y Pizarra Dinámica**: Mientras OpenBridge delega el trabajo pesado a los modelos satélites, Antigravity Zen mantiene limpia la ventana de contexto del agente principal, previniendo la degradación de contexto (*Context Rot*) y los bucles de error mediante su motor de pizarra en disco (`.zen/blackboard.md`).
+
+2. **[Deep Problem Orchestrator](https://github.com/MGSCOfficial/deep-problem-orchestrator)** 🏛️:
+   * **Descomposición Quirúrgica y Motor ATLAS**: Proporciona el marco de gobernanza Tri-Track para descomponer sistemas complejos en micro-problemas anatómicos (`00_Inventory.md`), trazando dependencias y validando contratos antes de disparar tareas mecánicas en OpenBridge.
+
+---
+
 ## 📋 Requisitos Previos
 
 1. **Node.js**: Versión `>= 18.0.0` (Probado en Node.js v24 LTS en Windows).
