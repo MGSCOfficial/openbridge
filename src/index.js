@@ -52,56 +52,70 @@ server.tool(
   }
 );
 
-// 2. Tool: Delegate Task (Sync)
+// 2. Tool: Delegate Task (Sync con Auto-Handoff Preventivo)
 server.tool(
   'openbridge_delegate_task',
-  'Delega una tarea de programacion de forma sincrona a un modelo gratuito de OpenCode Zen (ej. NVIDIA Nemotron 3.5) esperando la respuesta con latencia minima via SSE.',
+  'Delega una tarea con Auto-Handoff preventivo (120s): si el modelo tarda mas de 2 minutos pensando, transfiere la tarea de forma transparente a segundo plano para prevenir el corte de socket de Antigravity (180s).',
   {
     task: z.string().describe('Instruccion detallada de la tarea que debe realizar el worker externo'),
-    model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free)'),
+    model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free, opencode/deepseek-v4.1-flash-free)'),
     working_dir: z.string().optional().describe('Directorio absoluto de trabajo sobre el que debe operar OpenCode. Si se omite y read_only es true, opera en sandbox efimero.'),
     read_only: z.boolean().optional().default(false).describe('Si es true, le indica al modelo devolver analisis o codigo sugerido sin escribir archivos en disco.'),
-    timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo de espera en segundos')
+    timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo total de espera en segundos')
   },
   async (args) => {
-    let promptText = args.task;
-    let sandboxDir = null;
-    let effectiveDir = args.working_dir || null;
-
-    if (args.read_only && !effectiveDir) {
-      sandboxDir = createSandbox(`sync_${Date.now()}`);
-      effectiveDir = sandboxDir;
-      promptText = `[MODO SOLO LECTURA: NO MODIFIQUES NI CREES ARCHIVOS EN DISCO. DEVUELVE TU SOLUCION, CODIGO O ANALISIS EN TEXTO PLANO DENTRO DE TU RESPUESTA]\n\n${args.task}`;
-    }
-
     try {
-      const sessionID = await client.createSession({
-        title: `openbridge-sync-${Date.now()}`,
-        model: args.model || CONFIG.defaultModel,
-        directory: effectiveDir
-      });
+      // 1. Iniciar a través de jobManager para registrar estado y telemetría
+      const jobInfo = await jobManager.startJob(args);
 
-      await client.sendPrompt(sessionID, promptText);
+      // 2. Límite síncrono seguro: máximo 120s (Antigravity fuerza deadline a 180s)
+      const maxSyncMs = Math.min((args.timeout_seconds || 600) * 1000, 120000);
 
-      const timeoutMs = (args.timeout_seconds || 600) * 1000;
-      const result = await client.waitForCompletion(sessionID, timeoutMs);
+      // 3. Espera síncrona o handoff
+      const outcome = await jobManager.waitForJob(jobInfo.jobId, maxSyncMs);
 
+      if (outcome.done) {
+        const j = outcome.job;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  sessionID: j.sessionID,
+                  jobId: j.jobId,
+                  outcome: j.outcome,
+                  modelUsed: j.modelUsed || j.model,
+                  tokens: j.tokens,
+                  costUsd: 0,
+                  geminiQuotaOffloaded: '100%',
+                  durationSeconds: j.durationSeconds,
+                  diffsCount: j.diffs?.length || 0,
+                  diffs: j.diffs,
+                  response: j.result
+                },
+                null,
+                2
+              )
+            }
+          ]
+        };
+      }
+
+      // Si alcanzó los 120s sin fallar: Auto-Handoff transparente
       return {
         content: [
           {
             type: 'text',
             text: JSON.stringify(
               {
-                sessionID: result.sessionID,
-                outcome: result.outcome,
-                modelUsed: result.model?.id || args.model,
-                tokens: result.tokens,
-                costUsd: 0,
+                status: 'HANDOFF_TO_ASYNC',
+                jobId: jobInfo.jobId,
+                sessionID: jobInfo.sessionID,
+                model: jobInfo.model,
+                elapsedSeconds: Math.round(maxSyncMs / 1000),
                 geminiQuotaOffloaded: '100%',
-                durationSeconds: Math.round(result.durationMs / 1000),
-                diffsCount: result.diffs?.length || 0,
-                diffs: result.diffs,
-                response: result.text
+                message: 'El modelo continúa procesando un razonamiento profundo (Chain-of-Thought). Para prevenir el corte por timeout de 180s en Antigravity, la tarea fue transferida a segundo plano con seguridad total. Monitorea el progreso con openbridge_check_task o en el dashboard en vivo (http://localhost:4098).'
               },
               null,
               2
@@ -114,10 +128,6 @@ server.tool(
         isError: true,
         content: [{ type: 'text', text: `Error en tarea delegada: ${err.message}` }]
       };
-    } finally {
-      if (sandboxDir) {
-        cleanupSandbox(sandboxDir);
-      }
     }
   }
 );

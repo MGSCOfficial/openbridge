@@ -165,6 +165,47 @@ class JobManager extends EventEmitter {
       message: `Tarea ${jobId} interrumpida correctamente`
     };
   }
+
+  /**
+   * Espera la resolución de un job con un límite de tiempo síncrono.
+   * Si excede el límite (ej. 120s), retorna { handoff: true, job } para delegar a segundo plano.
+   */
+  waitForJob(jobId, timeoutMs = 120000) {
+    const job = this.jobs.get(jobId);
+    if (!job) return Promise.reject(new Error(`Tarea ${jobId} no encontrada`));
+    if (job.status === 'COMPLETED') return Promise.resolve({ done: true, job });
+    if (job.status === 'FAILED') return Promise.reject(new Error(job.error || 'La tarea falló'));
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve({ handoff: true, job });
+      }, timeoutMs);
+
+      const onCompleted = (completedJob) => {
+        if (completedJob.jobId === jobId) {
+          cleanup();
+          resolve({ done: true, job: completedJob });
+        }
+      };
+
+      const onFailed = (failedJob) => {
+        if (failedJob.jobId === jobId) {
+          cleanup();
+          reject(new Error(failedJob.error || 'La tarea falló'));
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off('task_completed', onCompleted);
+        this.off('task_failed', onFailed);
+      };
+
+      this.on('task_completed', onCompleted);
+      this.on('task_failed', onFailed);
+    });
+  }
 }
 
 export const jobManager = new JobManager();
