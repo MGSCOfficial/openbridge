@@ -141,5 +141,5 @@ npm run test:swarm
 
 ## 👤 Autoría y Créditos
 
-* **Desarrollo y Arquitectura**: **MGSCO** ([@MGSCOfficial](https://github.com/MGSCOfficial))
+* **Desarrollo y Arquitectura**: **MGSC** ([@MGSCOfficial](https://github.com/MGSCOfficial))
 * **Licencia**: Código abierto bajo la licencia [MIT](LICENSE).
