@@ -14,652 +14,681 @@ function renderDashboardHtml() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenBridge Telemetry Engine — Deep Model Monitor</title>
+  <title>OpenBridge Telemetry Console — Deep Model Monitor</title>
   <style>
     :root {
-      --bg: #070a13;
-      --card-bg: #0f172a;
-      --card-border: #1e293b;
-      --text: #f8fafc;
+      --bg: #0b0f17;
+      --surface: #111827;
+      --surface-subtle: #162032;
+      --border: #1f293d;
+      --border-focus: #38bdf8;
+      --text: #f1f5f9;
       --text-muted: #94a3b8;
+      --text-dim: #64748b;
       --accent: #38bdf8;
       --green: #10b981;
       --amber: #f59e0b;
       --red: #ef4444;
       --purple: #a855f7;
-      --pink: #ec4899;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
       background: var(--bg);
       color: var(--text);
-      padding: 1.25rem;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      font-size: 13px;
+      line-height: 1.5;
     }
+    /* Barra Superior */
     header {
+      background: #0d131f;
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid var(--card-border);
-      padding-bottom: 0.85rem;
     }
-    .brand {
+    .header-left {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 1rem;
     }
-    .brand h1 {
-      font-size: 1.25rem;
+    .logo {
       font-weight: 700;
-      letter-spacing: -0.02em;
+      font-size: 0.95rem;
+      letter-spacing: -0.01em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
-    .badge-live {
+    .status-badge {
       display: inline-flex;
       align-items: center;
       gap: 0.4rem;
-      padding: 0.2rem 0.6rem;
+      padding: 0.15rem 0.5rem;
       border-radius: 9999px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .badge-live.online {
-      background: rgba(16, 185, 129, 0.15);
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.1);
       color: var(--green);
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      border: 1px solid rgba(16, 185, 129, 0.25);
     }
-    .pulse {
-      width: 8px;
-      height: 8px;
+    .status-dot {
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: currentColor;
-      box-shadow: 0 0 8px currentColor;
-      animation: pulseAnim 2s infinite ease-in-out;
     }
-    @keyframes pulseAnim {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.8); }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      color: var(--text-muted);
+      font-size: 0.75rem;
     }
-    /* Grid de Métricas Principales */
-    .metrics-grid {
+    /* Contenedor Principal */
+    main {
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      flex: 1;
+    }
+    /* KPIs Limpios */
+    .kpi-row {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      grid-template-columns: repeat(4, 1fr);
       gap: 0.75rem;
     }
-    .metric-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 0.6rem;
-      padding: 0.85rem;
+    @media (max-width: 900px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.85rem 1rem;
     }
-    .metric-title {
+    .kpi-label {
       font-size: 0.7rem;
       text-transform: uppercase;
-      color: var(--text-muted);
       letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 600;
       margin-bottom: 0.35rem;
     }
-    .metric-value {
-      font-size: 1.45rem;
+    .kpi-value {
+      font-size: 1.4rem;
       font-weight: 700;
+      color: #fff;
+      font-feature-settings: "tnum";
     }
-    .metric-sub {
+    .kpi-sub {
       font-size: 0.72rem;
       color: var(--text-muted);
       margin-top: 0.25rem;
       display: flex;
       gap: 0.5rem;
     }
-    /* Barra de Modelos */
-    .model-summary-bar {
-      background: #0b1120;
-      border: 1px solid var(--card-border);
+    /* Barra de Distribución por Modelo */
+    .model-bar-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 0.5rem;
-      padding: 0.6rem 1rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.25rem;
-      font-size: 0.78rem;
-      align-items: center;
-    }
-    .model-summary-item {
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
-    }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-    .dot.nemotron { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .dot.deepseek { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-    .dot.gemma { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
-    /* Grid Principal */
-    .main-grid {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      gap: 1rem;
-      flex: 1;
-    }
-    @media (max-width: 1024px) {
-      .main-grid { grid-template-columns: 1fr; }
-    }
-    .panel {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 0.6rem;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .panel-header {
       padding: 0.75rem 1rem;
-      border-bottom: 1px solid var(--card-border);
-      font-weight: 600;
-      font-size: 0.85rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #0c1322;
-    }
-    .panel-body {
-      padding: 0.75rem;
-      overflow-y: auto;
-      flex: 1;
-      max-height: calc(100vh - 280px);
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
     }
-    .task-card {
-      background: #131d31;
-      border: 1px solid #24324c;
+    .model-bar-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .model-pills-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      font-size: 0.75rem;
+    }
+    .model-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .pill-circle {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .pill-circle.nemotron { background: var(--green); }
+    .pill-circle.deepseek { background: var(--accent); }
+    .pill-circle.gemma { background: var(--purple); }
+    /* Workspace Dividido */
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 1rem;
+      flex: 1;
+    }
+    @media (max-width: 1000px) { .workspace-grid { grid-template-columns: 1fr; } }
+    /* Columna de Tareas */
+    .sidebar-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 0.5rem;
-      padding: 0.75rem;
-      cursor: pointer;
-      transition: all 0.15s ease;
       display: flex;
       flex-direction: column;
-      gap: 0.35rem;
+      overflow: hidden;
     }
-    .task-card:hover {
-      border-color: var(--accent);
-      background: #17233b;
-    }
-    .task-card.active {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px var(--accent);
-      background: #192742;
-    }
-    .task-top {
+    .sidebar-header {
+      padding: 0.6rem 0.85rem;
+      background: #0d131f;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
-    .task-title {
+    .filter-btn-group {
+      display: flex;
+      gap: 0.25rem;
+      background: var(--bg);
+      padding: 0.15rem;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .filter-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.68rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .filter-btn.active {
+      background: #1e293d;
+      color: #fff;
+    }
+    .tasks-list {
+      padding: 0.5rem;
+      overflow-y: auto;
+      max-height: calc(100vh - 290px);
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      flex: 1;
+    }
+    .task-item {
+      background: #141c2c;
+      border: 1px solid var(--border);
+      border-radius: 0.4rem;
+      padding: 0.65rem 0.75rem;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .task-item:hover {
+      border-color: #334155;
+      background: #182236;
+    }
+    .task-item.active {
+      border-color: var(--accent);
+      background: #19263e;
+    }
+    .item-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .item-title {
       font-family: monospace;
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       font-weight: 700;
-      color: var(--accent);
+      color: #e2e8f0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 220px;
     }
-    .model-badge {
-      font-size: 0.68rem;
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
+    .item-model-badge {
+      font-size: 0.65rem;
       font-weight: 700;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
       text-transform: uppercase;
-      background: #090e1a;
+      background: #0b0f17;
       border: 1px solid #334155;
     }
-    .model-badge.nemotron { color: var(--green); border-color: rgba(16, 185, 129, 0.4); }
-    .model-badge.deepseek { color: var(--accent); border-color: rgba(56, 189, 248, 0.4); }
-    .model-badge.gemma { color: var(--purple); border-color: rgba(168, 85, 247, 0.4); }
-    .task-metrics-row {
+    .item-model-badge.nemotron { color: var(--green); border-color: rgba(16, 185, 129, 0.3); }
+    .item-model-badge.deepseek { color: var(--accent); border-color: rgba(56, 189, 248, 0.3); }
+    .item-model-badge.gemma { color: var(--purple); border-color: rgba(168, 85, 247, 0.3); }
+    .item-meta {
       display: flex;
-      gap: 0.6rem;
-      font-size: 0.72rem;
-      color: var(--text-muted);
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.7rem;
+      color: var(--text-dim);
     }
-    .status-pill {
-      font-size: 0.68rem;
+    .status-tag {
       font-weight: 700;
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
+      font-size: 0.65rem;
     }
-    .status-pill.running { background: rgba(245, 158, 11, 0.2); color: var(--amber); }
-    .status-pill.completed { background: rgba(16, 185, 129, 0.2); color: var(--green); }
-    .status-pill.failed { background: rgba(239, 68, 68, 0.2); color: var(--red); }
-    /* Pestañas de Detalle */
-    .tabs-header {
+    .status-tag.completed { color: var(--green); }
+    .status-tag.running { color: var(--amber); }
+    .status-tag.failed { color: var(--red); }
+    /* Panel de Detalle Principal */
+    .detail-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
       display: flex;
-      border-bottom: 1px solid var(--card-border);
-      background: #090e1a;
+      flex-direction: column;
+      overflow: hidden;
     }
-    .tab-btn {
-      padding: 0.6rem 1rem;
-      font-size: 0.78rem;
+    .tabs-bar {
+      display: flex;
+      background: #0d131f;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-item {
+      padding: 0.65rem 1.1rem;
+      font-size: 0.75rem;
       font-weight: 600;
+      color: var(--text-muted);
       background: transparent;
       border: none;
-      color: var(--text-muted);
       cursor: pointer;
       border-bottom: 2px solid transparent;
       transition: all 0.15s ease;
     }
-    .tab-btn:hover { color: var(--text); }
-    .tab-btn.active {
+    .tab-item:hover { color: #fff; }
+    .tab-item.active {
       color: var(--accent);
       border-bottom-color: var(--accent);
-      background: rgba(56, 189, 248, 0.05);
+      background: rgba(56, 189, 248, 0.04);
     }
-    .tab-content {
-      padding: 1rem;
+    .tab-body {
+      padding: 1.25rem;
       overflow-y: auto;
       flex: 1;
+      max-height: calc(100vh - 290px);
       display: flex;
       flex-direction: column;
       gap: 1rem;
     }
-    /* Tarjeta de Contexto y Telemetría Técnica (Estilo Imagen 2) */
-    .context-matrix {
+    /* Tabla Técnica Limpia (Exacta a OpenCode Imagen 2) */
+    .tech-table-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      background: #090e1a;
-      border: 1px solid var(--card-border);
-      border-radius: 0.5rem;
-      padding: 1rem;
-    }
-    .ctx-item {
-      display: flex;
-      flex-direction: column;
-      gap: 0.2rem;
-    }
-    .ctx-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .ctx-val {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--text);
-    }
-    .ctx-val.highlight { color: var(--accent); }
-    .ctx-val.green { color: var(--green); }
-    /* Lista de Mensajes en Bruto */
-    .raw-messages-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-    .raw-msg-item {
-      font-family: monospace;
-      font-size: 0.75rem;
-      background: #090e1a;
-      border: 1px solid var(--card-border);
-      border-radius: 0.35rem;
-      padding: 0.5rem 0.75rem;
-      display: flex;
-      justify-content: space-between;
-      color: #cbd5e1;
-    }
-    .raw-msg-item .role { font-weight: 700; color: var(--accent); }
-    /* Visores de Texto */
-    .text-box {
-      background: #040711;
-      border: 1px solid var(--card-border);
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem 1.5rem;
+      background: #0e1523;
+      border: 1px solid var(--border);
       border-radius: 0.4rem;
       padding: 1rem;
+    }
+    .tech-row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      padding: 0.35rem 0;
+      font-size: 0.75rem;
+    }
+    .tech-key { color: var(--text-dim); }
+    .tech-val { font-weight: 600; color: #e2e8f0; font-family: monospace; }
+    .tech-val.highlight { color: var(--accent); }
+    .tech-val.green { color: var(--green); }
+    /* Lista de Mensajes en Bruto */
+    .raw-msgs-box {
+      border: 1px solid var(--border);
+      border-radius: 0.4rem;
+      overflow: hidden;
       font-family: monospace;
-      font-size: 0.8rem;
-      line-height: 1.45;
+      font-size: 0.72rem;
+    }
+    .raw-msg-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0.75rem;
+      background: #0e1523;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    .raw-msg-row:last-child { border-bottom: none; }
+    /* Bloques de Texto / CoT */
+    .code-view {
+      background: #080c14;
+      border: 1px solid var(--border);
+      border-radius: 0.4rem;
+      padding: 1rem;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: #cbd5e1;
       white-space: pre-wrap;
       overflow-x: auto;
-      color: #e2e8f0;
       flex: 1;
     }
-    .diff-line.add { color: #4ade80; background: rgba(74, 222, 128, 0.08); display: block; }
-    .diff-line.del { color: #f87171; background: rgba(248, 113, 113, 0.08); display: block; }
-    .diff-line.info { color: #64748b; display: block; }
   </style>
 </head>
 <body>
   <header>
-    <div class="brand">
-      <div class="pulse" style="color: var(--green);"></div>
-      <h1>OpenBridge Telemetry Engine</h1>
-      <span class="badge-live online"><span class="pulse"></span> OPENCODE ONLINE (PORT 4096)</span>
+    <div class="header-left">
+      <div class="logo">
+        <span style="color: var(--accent);">⬡</span> OpenBridge Console
+      </div>
+      <span class="status-badge">
+        <span class="status-dot"></span> OPENCODE ENGINE ONLINE (PORT 4096)
+      </span>
     </div>
-    <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; gap: 1rem;" id="header-right">
-      <span>Auto-Sync: <strong style="color: var(--green);">2s Reactivo</strong></span>
-      <span id="sse-indicator" style="color: var(--green);">SSE: Conectado</span>
+    <div class="header-right">
+      <span>Auto-Sincronización: <strong>2s</strong></span>
+      <span style="color: var(--green);">● Live REST + SSE</span>
     </div>
   </header>
 
-  <!-- Métricas Principales -->
-  <div class="metrics-grid">
-    <div class="metric-card">
-      <div class="metric-title">Tokens Totales</div>
-      <div class="metric-value" id="stat-total-tokens">0</div>
-      <div class="metric-sub">
-        <span>In: <strong id="stat-sub-in">0</strong></span>
-        <span>Out: <strong id="stat-sub-out">0</strong></span>
-        <span>CoT: <strong id="stat-sub-cot" style="color: var(--accent);">0</strong></span>
+  <main>
+    <!-- KPIs -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Tokens Totales</div>
+        <div class="kpi-value" id="kpi-tokens-total">0</div>
+        <div class="kpi-sub">
+          <span>In: <strong id="kpi-tokens-in">0</strong></span>
+          <span>Out: <strong id="kpi-tokens-out">0</strong></span>
+          <span>CoT: <strong id="kpi-tokens-cot" style="color: var(--accent);">0</strong></span>
+        </div>
       </div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-title">Tareas Satélite</div>
-      <div class="metric-value" id="stat-total-tasks">0</div>
-      <div class="metric-sub">
-        <span>Completadas: <strong id="stat-sub-done" style="color: var(--green);">0</strong></span>
-        <span>Activas: <strong id="stat-sub-active" style="color: var(--amber);">0</strong></span>
+      <div class="kpi-card">
+        <div class="kpi-label">Sesiones Registradas</div>
+        <div class="kpi-value" id="kpi-tasks-total">0</div>
+        <div class="kpi-sub">
+          <span>Completadas: <strong id="kpi-tasks-done" style="color: var(--green);">0</strong></span>
+          <span>En curso: <strong id="kpi-tasks-active" style="color: var(--amber);">0</strong></span>
+        </div>
       </div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-title">Costo Satélite Acumulado</div>
-      <div class="metric-value" style="color: var(--green);">0,00 US$</div>
-      <div class="metric-sub">100% Cuota Antigravity Ahorrada</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-title">Tiempo Total de Cómputo</div>
-      <div class="metric-value" id="stat-total-time">0s</div>
-      <div class="metric-sub">Tiempo Satélites Desviado</div>
-    </div>
-  </div>
-
-  <!-- Resumen por Modelo -->
-  <div class="model-summary-bar" id="model-summary-bar">
-    <span style="font-weight: 700; color: var(--text-muted);">DESGLOSE POR MODELO:</span>
-    <div class="model-summary-item"><span class="dot nemotron"></span> <span>Nemotron 3.5: <strong id="tokens-nemotron">0</strong> tok</span></div>
-    <div class="model-summary-item"><span class="dot deepseek"></span> <span>DeepSeek V4.1: <strong id="tokens-deepseek">0</strong> tok</span></div>
-    <div class="model-summary-item"><span class="dot gemma"></span> <span>Gemma 4: <strong id="tokens-gemma">0</strong> tok</span></div>
-  </div>
-
-  <!-- Layout Principal -->
-  <div class="main-grid">
-    <!-- Lista de Tareas -->
-    <div class="panel">
-      <div class="panel-header">
-        <span>Sesiones de OpenCode (<span id="task-count-badge">0</span>)</span>
-        <button onclick="refreshData()" style="background: transparent; border: 1px solid #334155; color: #94a3b8; font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px; cursor: pointer;">Sincronizar</button>
+      <div class="kpi-card">
+        <div class="kpi-label">Costo Total Satélite</div>
+        <div class="kpi-value" style="color: var(--green);">0,00 US$</div>
+        <div class="kpi-sub">100% Cuota Antigravity Libre</div>
       </div>
-      <div class="panel-body" id="sessions-list">
-        <div style="text-align: center; color: var(--text-muted); padding: 2rem;">Cargando sesiones desde OpenCode...</div>
+      <div class="kpi-card">
+        <div class="kpi-label">Tiempo Total de Cómputo</div>
+        <div class="kpi-value" id="kpi-total-time">0s</div>
+        <div class="kpi-sub">Tiempo Satélites Desviado</div>
       </div>
     </div>
 
-    <!-- Panel de Detalle Técnico Profundo -->
-    <div class="panel">
-      <div class="tabs-header">
-        <button class="tab-btn active" onclick="switchTab('context')">Contexto & Telemetría</button>
-        <button class="tab-btn" onclick="switchTab('reasoning')">Pensamiento CoT (Reasoning)</button>
-        <button class="tab-btn" onclick="switchTab('output')">Respuesta Completa</button>
-        <button class="tab-btn" onclick="switchTab('diff')">Diff de Archivos</button>
+    <!-- Distribución de Tokens por Familia de Modelo -->
+    <div class="model-bar-panel">
+      <div class="model-bar-header">
+        <span>Consumo por Familia de Modelo</span>
+        <span id="model-total-label">0 tokens acumulados</span>
+      </div>
+      <div class="model-pills-row">
+        <div class="model-pill">
+          <span class="pill-circle nemotron"></span>
+          <span>Nemotron (NVIDIA): <strong id="model-nemotron-tok">0</strong> tok (<span id="model-nemotron-pct">0%</span>)</span>
+        </div>
+        <div class="model-pill">
+          <span class="pill-circle deepseek"></span>
+          <span>DeepSeek Flash: <strong id="model-deepseek-tok">0</strong> tok (<span id="model-deepseek-pct">0%</span>)</span>
+        </div>
+        <div class="model-pill">
+          <span class="pill-circle gemma"></span>
+          <span>Gemma (Google / OpenRouter): <strong id="model-gemma-tok">0</strong> tok (<span id="model-gemma-pct">0%</span>)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Workspace Master-Detail -->
+    <div class="workspace-grid">
+      <!-- Columna Izquierda: Historial -->
+      <div class="sidebar-panel">
+        <div class="sidebar-header">
+          <span style="font-weight: 700; font-size: 0.75rem;">Historial (<span id="filter-count">0</span>)</span>
+          <div class="filter-btn-group">
+            <button class="filter-btn active" onclick="setFilter('real')">Generación</button>
+            <button class="filter-btn" onclick="setFilter('all')">Todos</button>
+            <button class="filter-btn" onclick="setFilter('running')">En Curso</button>
+          </div>
+        </div>
+        <div class="tasks-list" id="tasks-list">
+          <div style="padding: 1.5rem; text-align: center; color: var(--text-dim);">Cargando sesiones...</div>
+        </div>
       </div>
 
-      <!-- Tab 1: Contexto y Métricas Detalladas (Estilo Imagen 2) -->
-      <div class="tab-content" id="tab-context">
-        <div class="context-matrix" id="context-matrix-content">
-          <div style="color: var(--text-muted); font-size: 0.85rem;">Selecciona una sesión en la columna izquierda para ver su telemetría anatómica.</div>
+      <!-- Columna Derecha: Detalle Técnico Anatómico -->
+      <div class="detail-panel">
+        <div class="tabs-bar">
+          <button class="tab-item active" onclick="setTab('context')">Contexto & Ficha Técnica</button>
+          <button class="tab-item" onclick="setTab('reasoning')">Razonamiento CoT (Pensamiento)</button>
+          <button class="tab-item" onclick="setTab('output')">Respuesta Generada</button>
+          <button class="tab-item" onclick="setTab('diff')">Diff de Archivos</button>
         </div>
 
-        <div style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-top: 0.5rem;">Mensajes en Bruto Registrados</div>
-        <div class="raw-messages-list" id="raw-messages-container"></div>
-      </div>
+        <!-- Tab 1: Ficha Técnica (Exacta a Imagen 2) -->
+        <div class="tab-body" id="tab-context">
+          <div class="tech-table-grid" id="tech-matrix">
+            <div style="color: var(--text-dim); grid-column: 1 / -1;">Selecciona una sesión de la columna izquierda.</div>
+          </div>
+          <div style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--text-dim);">Mensajes en Bruto Registrados</div>
+          <div class="raw-msgs-box" id="raw-msgs-box"></div>
+        </div>
 
-      <!-- Tab 2: Pensamiento CoT -->
-      <div class="tab-content" id="tab-reasoning" style="display: none;">
-        <div style="font-size: 0.75rem; color: var(--accent); font-weight: 600;">Cadena de Razonamiento Interno (Chain-of-Thought) generada por el satélite antes del código:</div>
-        <div class="text-box" id="reasoning-box">Sin razonamiento disponible.</div>
-      </div>
+        <!-- Tab 2: CoT -->
+        <div class="tab-body" id="tab-reasoning" style="display: none;">
+          <div style="font-size: 0.72rem; color: var(--accent); font-weight: 600;">Pensamiento interno paso a paso extraído del modelo:</div>
+          <div class="code-view" id="box-reasoning">Sin razonamiento disponible para esta sesión.</div>
+        </div>
 
-      <!-- Tab 3: Respuesta Completa -->
-      <div class="tab-content" id="tab-output" style="display: none;">
-        <div class="text-box" id="output-box">Selecciona una sesión.</div>
-      </div>
+        <!-- Tab 3: Output -->
+        <div class="tab-body" id="tab-output" style="display: none;">
+          <div class="code-view" id="box-output">Selecciona una sesión.</div>
+        </div>
 
-      <!-- Tab 4: Diff de Archivos -->
-      <div class="tab-content" id="tab-diff" style="display: none;">
-        <div class="text-box" id="diff-box">Sin modificaciones en archivos registradas para esta sesión.</div>
+        <!-- Tab 4: Diff -->
+        <div class="tab-body" id="tab-diff" style="display: none;">
+          <div class="code-view" id="box-diff">Sin modificaciones de archivos registradas.</div>
+        </div>
       </div>
     </div>
-  </div>
+  </main>
 
   <script>
-    let activeSessions = [];
-    let selectedSessionId = null;
-    let selectedDetail = null;
-    let currentTab = 'context';
+    let allSessions = [];
+    let selectedId = null;
+    let activeFilter = 'real'; // 'real', 'all', 'running'
+    let activeTab = 'context';
 
-    function switchTab(tabName) {
-      currentTab = tabName;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-
-      const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabName));
-      if (targetBtn) targetBtn.classList.add('active');
-
-      const targetContent = document.getElementById('tab-' + tabName);
-      if (targetContent) targetContent.style.display = 'flex';
+    function setFilter(f) {
+      activeFilter = f;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      event.target.classList.add('active');
+      renderList();
     }
 
-    function formatNumber(num) {
-      return (num || 0).toLocaleString();
+    function setTab(t) {
+      activeTab = t;
+      document.querySelectorAll('.tab-item').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-body').forEach(c => c.style.display = 'none');
+      event.target.classList.add('active');
+      document.getElementById('tab-' + t).style.display = 'flex';
     }
 
-    function getModelBadgeClass(modelName) {
-      const m = (modelName || '').toLowerCase();
+    function formatNumber(n) {
+      return (n || 0).toLocaleString();
+    }
+
+    function getFamily(modelStr) {
+      const m = (modelStr || '').toLowerCase();
       if (m.includes('nemotron')) return 'nemotron';
       if (m.includes('deepseek')) return 'deepseek';
       if (m.includes('gemma')) return 'gemma';
       return 'nemotron';
     }
 
-    async function refreshData() {
+    async function loadSessions() {
       try {
         const res = await fetch('/api/sessions');
         const data = await res.json();
-        activeSessions = data.sessions || [];
+        allSessions = data.sessions || [];
 
-        // Actualizar Métricas Top
-        document.getElementById('stat-total-tokens').textContent = formatNumber(data.totals.tokensTotal);
-        document.getElementById('stat-sub-in').textContent = formatNumber(data.totals.tokensInput);
-        document.getElementById('stat-sub-out').textContent = formatNumber(data.totals.tokensOutput);
-        document.getElementById('stat-sub-cot').textContent = formatNumber(data.totals.tokensReasoning);
+        // KPIs
+        document.getElementById('kpi-tokens-total').textContent = formatNumber(data.totals.tokensTotal);
+        document.getElementById('kpi-tokens-in').textContent = formatNumber(data.totals.tokensInput);
+        document.getElementById('kpi-tokens-out').textContent = formatNumber(data.totals.tokensOutput);
+        document.getElementById('kpi-tokens-cot').textContent = formatNumber(data.totals.tokensReasoning);
 
-        document.getElementById('stat-total-tasks').textContent = activeSessions.length;
-        document.getElementById('stat-sub-done').textContent = activeSessions.filter(s => s.status === 'COMPLETED').length;
-        document.getElementById('stat-sub-active').textContent = activeSessions.filter(s => s.status === 'RUNNING').length;
-        document.getElementById('stat-total-time').textContent = data.totals.durationSeconds + 's';
-        document.getElementById('task-count-badge').textContent = activeSessions.length;
+        document.getElementById('kpi-tasks-total').textContent = allSessions.length;
+        document.getElementById('kpi-tasks-done').textContent = allSessions.filter(s => s.status === 'COMPLETED').length;
+        document.getElementById('kpi-tasks-active').textContent = allSessions.filter(s => s.status === 'RUNNING').length;
+        document.getElementById('kpi-total-time').textContent = data.totals.durationSeconds + 's';
 
-        // Desglose por Modelo
-        document.getElementById('tokens-nemotron').textContent = formatNumber(data.modelBreakdown['nemotron-3.5-super-vl-free'] || data.modelBreakdown['nemotron'] || 0);
-        document.getElementById('tokens-deepseek').textContent = formatNumber(data.modelBreakdown['deepseek-v4.1-flash-free'] || data.modelBreakdown['deepseek'] || 0);
-        document.getElementById('tokens-gemma').textContent = formatNumber(data.modelBreakdown['gemma-4'] || data.modelBreakdown['gemma'] || 0);
+        // Desglose por Familia
+        let nemoTok = 0, deepTok = 0, gemmaTok = 0;
+        for (const [k, v] of Object.entries(data.modelBreakdown)) {
+          const fam = getFamily(k);
+          if (fam === 'nemotron') nemoTok += v;
+          else if (fam === 'deepseek') deepTok += v;
+          else if (fam === 'gemma') gemmaTok += v;
+        }
+        const total = nemoTok + deepTok + gemmaTok || 1;
+        document.getElementById('model-total-label').textContent = formatNumber(data.totals.tokensTotal) + ' tokens acumulados';
+        document.getElementById('model-nemotron-tok').textContent = formatNumber(nemoTok);
+        document.getElementById('model-nemotron-pct').textContent = Math.round((nemoTok / total) * 100) + '%';
+        document.getElementById('model-deepseek-tok').textContent = formatNumber(deepTok);
+        document.getElementById('model-deepseek-pct').textContent = Math.round((deepTok / total) * 100) + '%';
+        document.getElementById('model-gemma-tok').textContent = formatNumber(gemmaTok);
+        document.getElementById('model-gemma-pct').textContent = Math.round((gemmaTok / total) * 100) + '%';
 
-        renderSessionsList();
+        renderList();
 
-        if (activeSessions.length > 0 && !selectedSessionId) {
-          selectSession(activeSessions[0].id);
-        } else if (selectedSessionId) {
-          loadSessionDetail(selectedSessionId, false);
+        if (allSessions.length > 0 && !selectedId) {
+          const first = getFilteredSessions()[0];
+          if (first) selectSession(first.id);
+        } else if (selectedId) {
+          loadDetail(selectedId);
         }
       } catch (err) {
-        console.error('Error refreshing sessions:', err);
+        console.error('Error fetching sessions:', err);
       }
     }
 
-    function renderSessionsList() {
-      const container = document.getElementById('sessions-list');
-      if (activeSessions.length === 0) {
-        container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem;">No se encontraron sesiones en OpenCode.</div>';
+    function getFilteredSessions() {
+      if (activeFilter === 'running') {
+        return allSessions.filter(s => s.status === 'RUNNING');
+      }
+      if (activeFilter === 'real') {
+        // Tareas con salida sustancial (> 50 tokens) para omitir pings de 4-12 tokens
+        return allSessions.filter(s => (s.tokens.output > 50 || s.tokens.reasoning > 50 || s.status === 'RUNNING'));
+      }
+      return allSessions;
+    }
+
+    function renderList() {
+      const container = document.getElementById('tasks-list');
+      const filtered = getFilteredSessions();
+      document.getElementById('filter-count').textContent = filtered.length;
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="padding: 1.5rem; text-align: center; color: var(--text-dim);">No hay sesiones para este filtro.</div>';
         return;
       }
 
-      container.innerHTML = activeSessions.map(s => {
-        const isSel = s.id === selectedSessionId ? 'active' : '';
-        const badgeCls = getModelBadgeClass(s.modelName);
-        const statusCls = s.status === 'RUNNING' ? 'running' : (s.outcome === 'failed' ? 'failed' : 'completed');
+      container.innerHTML = filtered.map(s => {
+        const isSel = s.id === selectedId ? 'active' : '';
+        const fam = getFamily(s.modelName);
+        const stCls = s.status === 'RUNNING' ? 'running' : (s.outcome === 'failed' ? 'failed' : 'completed');
+        const stText = s.status === 'RUNNING' ? 'EN CURSO' : (s.outcome === 'failed' ? 'FALLIDA' : 'COMPLETADA');
         const dur = s.durationSeconds ? s.durationSeconds + 's' : '0s';
 
         return \`
-          <div class="task-card \${isSel}" onclick="selectSession('\${s.id}')">
-            <div class="task-top">
-              <span class="task-title" title="\${s.title || s.id}">\${s.title || s.id}</span>
-              <span class="model-badge \${badgeCls}">\${s.modelShortName}</span>
+          <div class="task-item \${isSel}" onclick="selectSession('\${s.id}')">
+            <div class="item-top">
+              <span class="item-title" title="\${s.title || s.id}">\${s.title || s.id}</span>
+              <span class="item-model-badge \${fam}">\${s.modelShortName}</span>
             </div>
-            <div class="task-metrics-row">
-              <span class="status-pill \${statusCls}">\${s.status}</span>
+            <div class="item-meta">
+              <span class="status-tag \${stCls}">● \${stText} (\${dur})</span>
               <span>Tokens: <strong>\${formatNumber(s.tokens.total)}</strong></span>
-              <span>Duración: \${dur}</span>
             </div>
           </div>
         \`;
       }).join('');
     }
 
-    async function selectSession(sessionId) {
-      selectedSessionId = sessionId;
-      renderSessionsList();
-      await loadSessionDetail(sessionId, true);
+    async function selectSession(id) {
+      selectedId = id;
+      renderList();
+      await loadDetail(id);
     }
 
-    async function loadSessionDetail(sessionId, resetTab) {
+    async function loadDetail(id) {
       try {
-        const res = await fetch('/api/session-detail?id=' + encodeURIComponent(sessionId));
-        const detail = await res.json();
-        selectedDetail = detail;
+        const res = await fetch('/api/session-detail?id=' + encodeURIComponent(id));
+        const data = await res.json();
+        const s = data.session;
 
-        // Renderizar Matriz de Contexto Anatómica (Idéntica a la Imagen 2)
-        const s = detail.session;
-        const matrixContainer = document.getElementById('context-matrix-content');
-        matrixContainer.innerHTML = \`
-          <div class="ctx-item">
-            <span class="ctx-label">Sesión</span>
-            <span class="ctx-val highlight">\${s.title || s.id}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Proveedor</span>
-            <span class="ctx-val">\${s.providerID || 'OpenCode'}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Modelo</span>
-            <span class="ctx-val highlight">\${detail.modelName || s.model?.id || 'Nemotron 3.5'}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Límite de Contexto</span>
-            <span class="ctx-val">1.048.576</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Uso de Ventana</span>
-            <span class="ctx-val">\${Math.max(1, Math.round(((s.tokens?.input || 0) / 1048576) * 100))}%</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Tokens Totales</span>
-            <span class="ctx-val">\${formatNumber(detail.tokensTotal)}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Tokens de Entrada</span>
-            <span class="ctx-val">\${formatNumber(s.tokens?.input || 0)}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Tokens de Salida</span>
-            <span class="ctx-val">\${formatNumber(s.tokens?.output || 0)}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Tokens de Razonamiento (CoT)</span>
-            <span class="ctx-val highlight">\${formatNumber(s.tokens?.reasoning || 0)}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Tokens de Caché (Lectura/Escritura)</span>
-            <span class="ctx-val">\${s.tokens?.cache?.read || 0} / \${s.tokens?.cache?.write || 0}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Mensajes Registrados</span>
-            <span class="ctx-val">\${detail.messagesCount || 0}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Costo Total</span>
-            <span class="ctx-val green">0,00 US$</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Sesión Creada</span>
-            <span class="ctx-val">\${new Date(s.time?.created || Date.now()).toLocaleTimeString()}</span>
-          </div>
-          <div class="ctx-item">
-            <span class="ctx-label">Última Actividad</span>
-            <span class="ctx-val">\${new Date(s.time?.updated || s.time?.idle || Date.now()).toLocaleTimeString()}</span>
-          </div>
+        // Ficha Técnica (Exacta a Imagen 2)
+        const matrix = document.getElementById('tech-matrix');
+        matrix.innerHTML = \`
+          <div class="tech-row"><span class="tech-key">Sesión</span><span class="tech-val highlight">\${s.title || s.id}</span></div>
+          <div class="tech-row"><span class="tech-key">Mensajes</span><span class="tech-val">\${data.messagesCount}</span></div>
+          <div class="tech-row"><span class="tech-key">Proveedor</span><span class="tech-val">\${s.providerID || 'OpenCode'}</span></div>
+          <div class="tech-row"><span class="tech-key">Modelo</span><span class="tech-val highlight">\${data.modelName}</span></div>
+          <div class="tech-row"><span class="tech-key">Límite de Contexto</span><span class="tech-val">1.048.576</span></div>
+          <div class="tech-row"><span class="tech-key">Tokens Totales</span><span class="tech-val">\${formatNumber(data.tokensTotal)}</span></div>
+          <div class="tech-row"><span class="tech-key">Uso de Ventana</span><span class="tech-val">\${Math.max(1, Math.round(((s.tokens?.input || 0) / 1048576) * 100))}%</span></div>
+          <div class="tech-row"><span class="tech-key">Tokens de Entrada</span><span class="tech-val">\${formatNumber(s.tokens?.input || 0)}</span></div>
+          <div class="tech-row"><span class="tech-key">Tokens de Salida</span><span class="tech-val">\${formatNumber(s.tokens?.output || 0)}</span></div>
+          <div class="tech-row"><span class="tech-key">Tokens de Razonamiento</span><span class="tech-val highlight">\${formatNumber(s.tokens?.reasoning || 0)}</span></div>
+          <div class="tech-row"><span class="tech-key">Tokens de Caché (R/W)</span><span class="tech-val">\${s.tokens?.cache?.read || 0} / \${s.tokens?.cache?.write || 0}</span></div>
+          <div class="tech-row"><span class="tech-key">Costo Total</span><span class="tech-val green">0,00 US$</span></div>
+          <div class="tech-row"><span class="tech-key">Sesión Creada</span><span class="tech-val">\${new Date(s.time?.created || Date.now()).toLocaleTimeString()}</span></div>
+          <div class="tech-row"><span class="tech-key">Última Actividad</span><span class="tech-val">\${new Date(s.time?.updated || s.time?.idle || Date.now()).toLocaleTimeString()}</span></div>
         \`;
 
-        // Renderizar Mensajes en Bruto
-        const rawContainer = document.getElementById('raw-messages-container');
-        if (detail.rawMessages && detail.rawMessages.length > 0) {
-          rawContainer.innerHTML = detail.rawMessages.map(m => {
+        // Mensajes en Bruto
+        const rawBox = document.getElementById('raw-msgs-box');
+        if (data.rawMessages && data.rawMessages.length > 0) {
+          rawBox.innerHTML = data.rawMessages.map(m => {
             return \`
-              <div class="raw-msg-item">
-                <span><span class="role">\${m.type}</span> • \${m.id}</span>
-                <span style="color: var(--text-muted);">\${m.time || ''}</span>
+              <div class="raw-msg-row">
+                <span><strong>\${m.type}</strong> • \${m.id}</span>
+                <span style="color: var(--text-dim);">\${m.time}</span>
               </div>
             \`;
           }).join('');
         } else {
-          rawContainer.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem;">Sin mensajes en bruto.</div>';
+          rawBox.innerHTML = '<div style="padding: 0.5rem; color: var(--text-dim);">Sin mensajes.</div>';
         }
 
-        // Renderizar Pestaña CoT
-        document.getElementById('reasoning-box').textContent = detail.reasoningText || 'Este turno no requirió bloque de razonamiento CoT independiente o ya fue consolidado.';
+        // Bloques CoT y Output
+        document.getElementById('box-reasoning').textContent = data.reasoningText || 'Esta sesión no generó cadena de razonamiento CoT independiente o ya fue consolidada en texto.';
+        document.getElementById('box-output').textContent = data.outputText || 'Sin texto generado.';
 
-        // Renderizar Pestaña Output
-        document.getElementById('output-box').textContent = detail.outputText || 'Esperando respuesta del modelo...';
-
-        // Renderizar Pestaña Diff
-        const diffBox = document.getElementById('diff-box');
-        if (detail.diffs && detail.diffs.length > 0) {
-          const diffHtml = detail.diffs.map(d => {
-            const lines = (d.diff || '').split('\\n').map(l => {
-              if (l.startsWith('+')) return \`<span class="diff-line add">\${escapeHtml(l)}</span>\`;
-              if (l.startsWith('-')) return \`<span class="diff-line del">\${escapeHtml(l)}</span>\`;
-              return \`<span class="diff-line info">\${escapeHtml(l)}</span>\`;
-            }).join('');
-            return \`--- \${d.file || 'archivo'} ---\\n\${lines}\`;
-          }).join('\\n\\n');
-          diffBox.innerHTML = diffHtml;
+        // Diff
+        const diffBox = document.getElementById('box-diff');
+        if (data.diffs && data.diffs.length > 0) {
+          diffBox.textContent = data.diffs.map(d => \`--- \${d.file} ---\\n\${d.diff}\`).join('\\n\\n');
         } else {
-          diffBox.textContent = 'Sin modificaciones en archivos en disco (Modo de lectura pura o código en texto).';
+          diffBox.textContent = 'Sin modificaciones en disco (Modo de lectura pura o consulta algorítmica).';
         }
-
       } catch (err) {
-        console.error('Error loading session detail:', err);
+        console.error('Error loading detail:', err);
       }
     }
 
-    function escapeHtml(s) {
-      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    }
-
-    // Inicializar
-    refreshData();
-    setInterval(refreshData, 2000); // Polling cada 2s para cero desfase
-
-    // SSE Stream
-    try {
-      const es = new EventSource('/api/events');
-      es.onmessage = () => { refreshData(); };
-    } catch {}
+    loadSessions();
+    setInterval(loadSessions, 2000);
   </script>
 </body>
 </html>`;
@@ -693,7 +722,6 @@ export function startDashboardServer(port = 4098) {
       return;
     }
 
-    // 1. Endpoint REST: Todas las Sesiones sincronizadas directamente desde OpenCode
     if (url.pathname === '/api/sessions') {
       try {
         const rawSessions = await client.request('/api/session');
@@ -731,8 +759,8 @@ export function startDashboardServer(port = 4098) {
           const isRunning = s.time?.busy && (!s.time.idle || s.time.busy > s.time.idle);
 
           let shortName = 'Nemotron';
-          if (modelId.includes('deepseek')) shortName = 'DeepSeek';
-          else if (modelId.includes('gemma')) shortName = 'Gemma';
+          if (modelId.toLowerCase().includes('deepseek')) shortName = 'DeepSeek';
+          else if (modelId.toLowerCase().includes('gemma')) shortName = 'Gemma';
 
           return {
             id: s.id,
@@ -750,7 +778,7 @@ export function startDashboardServer(port = 4098) {
             },
             time: s.time
           };
-        }).reverse(); // Más recientes primero
+        }).reverse();
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
         res.end(JSON.stringify({
@@ -771,12 +799,11 @@ export function startDashboardServer(port = 4098) {
       return;
     }
 
-    // 2. Endpoint REST: Detalle Anatómico y Mensajes de una Sesión Específica
     if (url.pathname === '/api/session-detail') {
       const sessionId = url.searchParams.get('id');
       if (!sessionId) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Falta parametro id' }));
+        res.end(JSON.stringify({ error: 'Falta id' }));
         return;
       }
 
@@ -837,7 +864,6 @@ export function startDashboardServer(port = 4098) {
       return;
     }
 
-    // 3. Endpoint SSE para Push Reactivo
     if (url.pathname === '/api/events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -847,7 +873,6 @@ export function startDashboardServer(port = 4098) {
       });
       res.write('\n');
       sseClients.add(res);
-
       req.on('close', () => { sseClients.delete(res); });
       return;
     }
@@ -858,14 +883,14 @@ export function startDashboardServer(port = 4098) {
 
   serverInstance.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`[OpenBridge Dashboard]: El puerto ${port} está en uso.`);
+      console.warn(`[OpenBridge Dashboard]: Puerto ${port} ocupado.`);
     } else {
       console.error('[OpenBridge Dashboard Error]:', err.message);
     }
   });
 
   serverInstance.listen(port, '127.0.0.1', () => {
-    console.log(`[OpenBridge Deep Telemetry]: Servidor activo en http://127.0.0.1:${port}`);
+    console.log(`[OpenBridge Console]: Servidor activo en http://127.0.0.1:${port}`);
   });
 
   pingInterval = setInterval(() => {
