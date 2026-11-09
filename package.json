@@ -1,9 +1,29 @@
 {
   "name": "openbridge-mcp",
-  "version": "1.1.0",
+  "version": "1.1.0-beta.1",
   "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models with Real-Time SSE and Multi-Agent Swarms",
   "main": "src/index.js",
   "type": "module",
+  "author": "MGSCO <https://github.com/MGSCOfficial>",
+  "license": "MIT",
+  "homepage": "https://github.com/MGSCOfficial/openbridge#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MGSCOfficial/openbridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MGSCOfficial/openbridge/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "antigravity",
+    "opencode",
+    "nemotron",
+    "deepseek",
+    "ai-agents",
+    "swarm"
+  ],
   "bin": {
     "openbridge-mcp": "./src/index.js"
   },
