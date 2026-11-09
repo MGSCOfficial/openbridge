@@ -3,7 +3,7 @@
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
 > Este ecosistema se encuentra actualmente en **fase experimental de pruebas**. Este software se distribuye con fines de investigación, desarrollo y automatización de flujos agénticos avanzados. No representa un producto final cerrado.
 
-Puente agéntico de alto rendimiento bajo el protocolo **Model Context Protocol (MCP)** que conecta entornos de trabajo agénticos (como **Google Antigravity**) con clústeres locales y satélites de **OpenCode Zen / Free Tier**.
+Puente agéntico de alto rendimiento bajo el protocolo **Model Context Protocol (MCP)** que conecta entornos de trabajo agénticos (como **Google Antigravity**) con clústeres locales y satélites de **OpenCode Zen**.
 
 Permite orquestar, disparar enjambres multi-modelo concurrentes y delegar tareas de código mecánicas a modelos como **NVIDIA Nemotron 3.5 Super VL**, **Nemotron 3.5 Lightning** y **DeepSeek V4.1 Flash**, rindiendo así la cuota de razonamiento de modelos principales como Gemini o involucrando a este.
 
