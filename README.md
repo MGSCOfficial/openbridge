@@ -95,8 +95,9 @@ Para maximizar la potencia, orden y estabilidad de **OpenBridge**, se recomienda
    ```
 3. **Daemon de OpenCode Activo**: El daemon debe estar corriendo o configurado para auto-arranque en el puerto `4096`:
    ```bash
-   opencode serve --port 4096 --password openbridge_local_token_2026
+   opencode serve --port 4096 --password "$(cat ~/.openbridge/token)"
    ```
+   El token lo genera OpenBridge en `~/.openbridge/token` (ver [Variables de entorno](#3-variables-de-entorno)).
 4. **Google Antigravity** (o cualquier cliente compatible con MCP).
 
 ---
@@ -124,13 +125,45 @@ Agrega la siguiente entrada en la configuración de servidores MCP de Antigravit
       "env": {
         "OPENCODE_PORT": "4096",
         "OPENCODE_HOST": "127.0.0.1",
-        "OPENCODE_SERVER_PASSWORD": "openbridge_local_token_2026",
         "OPENCODE_DEFAULT_MODEL": "opencode/nemotron-3.5-super-vl-free"
       }
     }
   }
 }
 ```
+
+> **No hardcodees la contraseña del daemon.** OpenBridge genera un token
+> criptográfico en `~/.openbridge/token` en el primer arranque. Si necesitas
+> fijar uno explícito, exporta `OPENCODE_SERVER_PASSWORD` en el entorno (tiene
+> prioridad sobre el archivo). El antiguo literal `openbridge_local_token_2026`
+> ya **no** se usa: solo se acepta si activas `OPENBRIDGE_ALLOW_LEGACY=1` como
+> puente de migración, y el proceso lo reporta con un warning.
+
+### 3. Variables de entorno
+
+| Variable | Default | Efecto |
+| :--- | :--- | :--- |
+| `OPENCODE_SERVER_PASSWORD` | token de `~/.openbridge/token` | Credencial del daemon (prioridad máxima) |
+| `OPENBRIDGE_DATA_DIR` | `~/.openbridge` | Directorio de `token` y `jobs.jsonl` |
+| `OPENBRIDGE_ALLOW_LEGACY` | `0` | Acepta el token legacy hardcodeado. **Solo migración**: elimínalo tras rotar el daemon |
+| `OPENBRIDGE_ALLOW_NESTED` | `0` | Permite que un worker delegue a su vez. Desactivado por seguridad |
+| `OPENBRIDGE_MAX_DEPTH` | `2` | Techo de profundidad cuando el nesting está habilitado |
+| `OPENBRIDGE_JOBS_RETENTION` | `200` | Máximo de jobs persistidos en `jobs.jsonl` |
+
+### 4. Rotar el token del daemon
+
+```bash
+# 1. Leer el token generado
+cat ~/.openbridge/token
+
+# 2. Reiniciar OpenCode con ese token
+opencode serve --port 4096 --password "$(cat ~/.openbridge/token)"
+
+# 3. Eliminar OPENBRIDGE_ALLOW_LEGACY del entorno del MCP y reiniciarlo
+```
+
+Mientras el daemon siga autenticando con el token viejo, el secreto efectivo es
+el viejo, aunque el código ya no lo adopte sin permiso explícito.
 
 ---
 
@@ -142,12 +175,18 @@ OpenBridge cuenta con una suite de pruebas de caja negra y estrés:
 # 1. Comprobación de integridad sintáctica
 npm run check
 
-# 2. Validación de conectividad y streaming SSE de baja latencia
+# 2. Suite de remediación (persistencia, fallback, recursión, token) — 5 pruebas
+npm run test:remediation
+
+# 3. Validación de conectividad y streaming SSE de baja latencia
 npm run test:latency
 
-# 3. Prueba de enjambre paralelo concurrente (3 modelos simultáneos a $0)
+# 4. Prueba de enjambre paralelo concurrente (3 modelos simultáneos a $0)
 npm run test:swarm
 ```
+
+La suite de remediación usa un `OPENBRIDGE_DATA_DIR` temporal: no escribe en
+`~/.openbridge`, así que no contamina el historial de producción.
 
 ---
 

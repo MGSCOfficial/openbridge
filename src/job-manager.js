@@ -14,7 +14,24 @@ class JobManager extends EventEmitter {
     this.recoverPendingJobs().catch(() => {});
   }
 
+  /**
+   * Retención acotada: sin esto, jobs.jsonl crece indefinidamente y _loadJobs
+   * parsea todo el histórico en cada arranque. Nunca elimina jobs RUNNING.
+   */
+  _pruneJobs() {
+    const max = CONFIG.jobsRetention;
+    if (!max || this.jobs.size <= max) return;
+    const removable = Array.from(this.jobs.values())
+      .filter((j) => j.status !== 'RUNNING')
+      .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+    for (const job of removable) {
+      if (this.jobs.size <= max) break;
+      this.jobs.delete(job.jobId);
+    }
+  }
+
   _saveJobs() {
+    this._pruneJobs();
     try {
       if (!CONFIG.jobsFile) return;
       const tmpFile = `${CONFIG.jobsFile}.tmp`;
@@ -58,32 +75,37 @@ class JobManager extends EventEmitter {
 
   async recoverPendingJobs() {
     for (const [, job] of this.jobs.entries()) {
-      if (job.status === 'RUNNING') {
-        try {
-          const session = await client.request(`/api/session/${job.sessionID}`);
-          if (session && session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy)) {
-            const result = await client.waitForCompletion(job.sessionID, 5000).catch(() => null);
-            if (result) {
-              job.status = 'COMPLETED';
-              job.completedAt = Date.now();
-              job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
-              job.outcome = result.outcome;
-              job.modelUsed = result.model?.id || job.model;
-              job.tokens = result.tokens;
-              job.diffs = result.diffs || [];
-              job.result = result.text;
-            } else {
-              job.status = 'COMPLETED';
-              job.completedAt = Date.now();
-            }
-          } else {
-            this._trackJobBackground(job, 600);
-          }
-        } catch (err) {
-          job.status = 'FAILED';
-          job.completedAt = Date.now();
-          job.error = `Recuperación post-reinicio: ${err.message}`;
+      if (job.status !== 'RUNNING') continue;
+      try {
+        const session = await client.request(`/api/session/${job.sessionID}`);
+        const isIdle = session && session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy);
+
+        if (!isIdle) {
+          // La sesión sigue trabajando: retomar el seguimiento con el prompt íntegro.
+          const recoverDir = job.sandboxDir && fs.existsSync(job.sandboxDir) ? job.sandboxDir : null;
+          this._trackJobBackground(job, 600, recoverDir, job.promptText || '');
+          continue;
         }
+
+        const result = await client.waitForCompletion(job.sessionID, 5000).catch(() => null);
+        if (!result) {
+          // Idle sin resultado recuperable NO es éxito: sería un falso COMPLETED.
+          throw new Error('[RECOVERY_INCOMPLETE] La sesión está idle pero no se pudo recolectar el resultado');
+        }
+
+        job.status = 'COMPLETED';
+        job.completedAt = Date.now();
+        job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
+        job.outcome = result.outcome;
+        job.modelUsed = result.model?.id || job.model;
+        job.tokens = result.tokens;
+        job.diffs = result.diffs || [];
+        job.result = result.text;
+      } catch (err) {
+        job.status = 'FAILED';
+        job.completedAt = Date.now();
+        job.durationSeconds = Math.round((job.completedAt - (job.startedAt || job.completedAt)) / 1000);
+        job.error = `Recuperación post-reinicio: ${err.message}`;
       }
     }
     this._saveJobs();
@@ -99,10 +121,20 @@ class JobManager extends EventEmitter {
       call_depth = 0
     } = options;
 
-    // P04: Guardián de Recursión Agéntica (Depth Guard)
-    if (call_depth >= CONFIG.maxDepth) {
+    // P04: Guardián de Recursión Agéntica (Depth Guard).
+    // `call_depth` lo declara el cliente y por tanto NO es confiable: sirve como
+    // primer filtro, no como certificación. La delegación anidada está prohibida
+    // por defecto para que un worker no pueda reiniciar el contador pasando 0.
+    const declaredDepth = Number.isFinite(call_depth) && call_depth > 0 ? Math.floor(call_depth) : 0;
+    if (declaredDepth > 0 && !CONFIG.allowNested) {
       throw new Error(
-        `[RECURSION_LIMIT_EXCEEDED] Profundidad máxima de delegación alcanzada (${call_depth} >= ${CONFIG.maxDepth}). Prohibida la auto-delegación recursiva para prevenir fork bombs.`
+        '[NESTED_DELEGATION_DISABLED] La delegación desde un worker está deshabilitada por defecto. ' +
+          'Un orquestador raíz (call_depth = 0) no se ve afectado. Para habilitarla: OPENBRIDGE_ALLOW_NESTED=1.'
+      );
+    }
+    if (declaredDepth >= CONFIG.maxDepth) {
+      throw new Error(
+        `[RECURSION_LIMIT_EXCEEDED] Profundidad máxima de delegación alcanzada (${declaredDepth} >= ${CONFIG.maxDepth}). Prohibida la auto-delegación recursiva para prevenir fork bombs.`
       );
     }
 
@@ -113,26 +145,36 @@ class JobManager extends EventEmitter {
     if (read_only) {
       promptText = `[MODO SOLO LECTURA: NO MODIFIQUES NI CREES ARCHIVOS EN DISCO. DEVUELVE TU SOLUCION, CODIGO O ANALISIS EN TEXTO PLANO DENTRO DE TU RESPUESTA]\n\n${task}`;
     }
-    if (call_depth > 0) {
-      promptText = `[OPENBRIDGE_RECURSION_DEPTH: ${call_depth}]\n${promptText}`;
+    if (declaredDepth > 0) {
+      promptText = `[OPENBRIDGE_RECURSION_DEPTH: ${declaredDepth}]\n${promptText}`;
     }
 
     let activeModel = model;
     let sessionID = null;
 
-    // P02: Intentar crear sesión y despachar prompt con fallback automático
+    // P02: crear sesión + despachar prompt como una sola unidad atómica.
+    // sessionID SOLO se fija cuando el prompt fue aceptado. Si se asigna antes y
+    // sendPrompt falla, el bucle termina sin reintentar y el job queda "COMPLETED"
+    // sobre una sesión vacía (falso éxito silencioso).
     while (!sessionID) {
+      let candidateSessionID = null;
       try {
-        sessionID = await client.createSession({
+        candidateSessionID = await client.createSession({
           title: `openbridge-${jobId}`,
           model: activeModel,
           directory: effectiveDir
         });
-        await client.sendPrompt(sessionID, promptText);
+        await client.sendPrompt(candidateSessionID, promptText);
+        sessionID = candidateSessionID;
       } catch (err) {
+        if (candidateSessionID) {
+          await client.interruptSession(candidateSessionID).catch(() => {});
+        }
         const nextModel = getNextFallbackModel(activeModel);
         if (nextModel && isRecoverableModelError(err)) {
-          console.warn(`[OpenBridge Fallback] Modelo ${activeModel} falló (${err.message}). Conmutando a ${nextModel}...`);
+          console.warn(
+            `[OpenBridge Fallback] Modelo ${activeModel} falló en create/send (${err.message}). Conmutando a ${nextModel}...`
+          );
           activeModel = nextModel;
         } else {
           if (read_only && effectiveDir) {
@@ -149,9 +191,12 @@ class JobManager extends EventEmitter {
       model: activeModel,
       initialModel: model,
       task: task.slice(0, 100) + (task.length > 100 ? '...' : ''),
+      // Prompt completo: la recuperación post-reinicio lo necesita íntegro.
+      // `task` es solo una vista previa para la UI.
+      promptText,
       readOnly: read_only,
       sandboxDir: read_only ? effectiveDir : null,
-      callDepth: call_depth,
+      callDepth: declaredDepth,
       status: 'RUNNING',
       startedAt: Date.now(),
       completedAt: null,
@@ -174,7 +219,7 @@ class JobManager extends EventEmitter {
       model: activeModel,
       status: 'RUNNING',
       startedAt: new Date(job.startedAt).toISOString(),
-      callDepth: call_depth,
+      callDepth: declaredDepth,
       message: 'Tarea iniciada en segundo plano con éxito'
     };
   }
@@ -209,7 +254,7 @@ class JobManager extends EventEmitter {
               directory: job.sandboxDir || effectiveDir
             });
             job.sessionID = newSessionID;
-            await client.sendPrompt(newSessionID, promptText || job.task);
+            await client.sendPrompt(newSessionID, promptText || job.promptText || job.task);
             return this._trackJobBackground(job, timeoutSeconds, effectiveDir, promptText);
           } catch (fallbackErr) {
             err = fallbackErr;

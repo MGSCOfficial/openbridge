@@ -3,6 +3,17 @@ import { CONFIG, getBaseUrl, getAuthHeader } from './config.js';
 
 let spawnedProcess = null;
 let activeAuthPassword = CONFIG.serverPassword;
+let authWarningEmitted = false;
+
+// Token legacy de versiones <= 1.1.0-beta.1. Ya no se usa por defecto: solo se
+// acepta si el operador habilita OPENBRIDGE_ALLOW_LEGACY=1 durante la migración.
+const LEGACY_PASSWORD = 'openbridge_local_token_2026';
+
+function warnAuthOnce(message) {
+  if (authWarningEmitted) return;
+  authWarningEmitted = true;
+  console.warn(`[OpenBridge Auth] ${message}`);
+}
 
 export async function isServerAlive(password = null) {
   const url = `${getBaseUrl()}/api/info`;
@@ -46,16 +57,24 @@ export async function ensureServerRunning() {
     return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
   }
 
-  // 1b. Backward-compatibility: Check if server is running with legacy token
-  const legacyCheck = await checkServerAuth('openbridge_local_token_2026');
-  if (legacyCheck.ok) {
-    activeAuthPassword = 'openbridge_local_token_2026';
-    return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
+  // 1b. Compatibilidad legacy: SOLO si se habilita explícitamente.
+  if (process.env.OPENBRIDGE_ALLOW_LEGACY === '1') {
+    const legacyCheck = await checkServerAuth(LEGACY_PASSWORD);
+    if (legacyCheck.ok) {
+      warnAuthOnce(
+        'Autenticando con el token legacy hardcodeado. Rota el daemon con OPENCODE_SERVER_PASSWORD y elimina OPENBRIDGE_ALLOW_LEGACY=1.'
+      );
+      activeAuthPassword = LEGACY_PASSWORD;
+      return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
+    }
   }
 
   // 2. If already alive on port (e.g. desktop app with auto-generated token)
   const alive = await isServerAlive();
   if (alive) {
+    warnAuthOnce(
+      'El daemon responde pero rechaza el token configurado. Define OPENCODE_SERVER_PASSWORD con el token del daemon, o habilita OPENBRIDGE_ALLOW_LEGACY=1 temporalmente.'
+    );
     return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword, warning: 'Auth required' };
   }
 

@@ -8,7 +8,7 @@ import { registerAllTools } from './tools.js';
 
 const server = new McpServer({
   name: 'openbridge-mcp',
-  version: '1.1.0'
+  version: '1.1.0-beta.2'
 });
 
 // Registrar todas las herramientas de forma unificada desde src/tools.js (Cero Código Muerto)

@@ -1,57 +1,83 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { CONFIG } from '../src/config.js';
-import { jobManager } from '../src/job-manager.js';
-import { FREE_FALLBACK_CHAIN, getNextFallbackModel, isRecoverableModelError } from '../src/client.js';
-import { TOOLS } from '../src/tools.js';
 
-console.log('=== TEST SUITE: REMEDIACIÓN DE GRIETAS OPENBRIDGE (DEEPSEEK AUDIT) ===');
+// Aislamiento obligatorio: los tests NUNCA deben escribir en ~/.openbridge real.
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openbridge-test-'));
+process.env.OPENBRIDGE_DATA_DIR = dataDir;
+
+const { CONFIG } = await import('../src/config.js');
+const { jobManager } = await import('../src/job-manager.js');
+const { client, FREE_FALLBACK_CHAIN, getNextFallbackModel, isRecoverableModelError } = await import(
+  '../src/client.js'
+);
+const { TOOLS, registerAllTools } = await import('../src/tools.js');
+
+console.log('=== TEST SUITE: REMEDIACIÓN DE GRIETAS OPENBRIDGE (v1.1.0-beta.2) ===');
+console.log(`dataDir aislado: ${dataDir}`);
+
+let failures = 0;
+async function test(name, fn) {
+  try {
+    await fn();
+    console.log(`  ✅ ${name} PASS`);
+  } catch (err) {
+    failures += 1;
+    console.error(`  ❌ ${name} FAIL: ${err.message}`);
+  }
+}
 
 async function testP03DynamicAuth() {
-  console.log('\n[TEST P03] 1. Verificando generación y lectura dinámica de token...');
   assert.ok(CONFIG.serverPassword, 'serverPassword no debe estar vacío');
-  assert.notStrictEqual(
-    CONFIG.serverPassword,
-    'openbridge_local_token_2026',
-    'La contraseña ya NO debe ser el token estático hardcodeado'
-  );
+  assert.notStrictEqual(CONFIG.serverPassword, 'openbridge_local_token_2026', 'no debe ser el token estático');
+  assert.ok(CONFIG.serverPassword.length >= 32, 'el token debe tener entropía suficiente (>=32 chars)');
+
   const tokenFile = path.join(CONFIG.dataDir, 'token');
-  assert.ok(fs.existsSync(tokenFile), 'El archivo ~/.openbridge/token debe existir en disco');
-  const fileContent = fs.readFileSync(tokenFile, 'utf8').trim();
-  assert.strictEqual(fileContent, CONFIG.serverPassword, 'El token en disco debe coincidir con CONFIG.serverPassword');
-  console.log('  ✅ P03 PASS: Token dinámico criptográfico generado y validado con éxito.');
+  assert.ok(fs.existsSync(tokenFile), 'el archivo token debe existir');
+  assert.strictEqual(fs.readFileSync(tokenFile, 'utf8').trim(), CONFIG.serverPassword);
+
+  // Regresión: el literal legacy solo puede aparecer una vez (constante) y debe
+  // estar gobernado por OPENBRIDGE_ALLOW_LEGACY.
+  const source = fs.readFileSync(new URL('../src/server-manager.js', import.meta.url), 'utf8');
+  assert.ok(source.includes('OPENBRIDGE_ALLOW_LEGACY'), 'la ruta legacy debe estar gateada por env');
+  const occurrences = (source.match(/openbridge_local_token_2026/g) || []).length;
+  assert.ok(occurrences <= 1, `el literal legacy aparece ${occurrences} veces; debe ser 1 (constante)`);
 }
 
 async function testP04RecursionGuard() {
-  console.log('\n[TEST P04] 2. Verificando guardián de recursión agéntica (Depth Guard)...');
-  assert.strictEqual(CONFIG.maxDepth, 2, 'CONFIG.maxDepth debe ser 2 por defecto');
+  assert.strictEqual(CONFIG.maxDepth, 2, 'maxDepth por defecto = 2');
 
-  // Intento de iniciar job con call_depth = 2 (debe ser bloqueado inmediatamente)
-  let blocked = false;
+  // Default-deny: un worker no puede abrir una delegación anidada.
+  await assert.rejects(
+    () => jobManager.startJob({ task: 'nested attempt', call_depth: 1 }),
+    /NESTED_DELEGATION_DISABLED/,
+    'con allowNested=false, call_depth>0 debe rechazarse'
+  );
+
+  // Con nesting habilitado, el techo maxDepth sigue vigente.
+  const previous = CONFIG.allowNested;
+  CONFIG.allowNested = true;
   try {
-    await jobManager.startJob({
-      task: 'Tarea de prueba recursiva',
-      call_depth: 2
-    });
-  } catch (err) {
-    if (err.message.includes('RECURSION_LIMIT_EXCEEDED')) {
-      blocked = true;
-    }
+    await assert.rejects(
+      () => jobManager.startJob({ task: 'too deep', call_depth: 2 }),
+      /RECURSION_LIMIT_EXCEEDED/,
+      'call_depth >= maxDepth debe rechazarse'
+    );
+  } finally {
+    CONFIG.allowNested = previous;
   }
-
-  assert.strictEqual(blocked, true, 'Debe lanzar RECURSION_LIMIT_EXCEEDED si call_depth >= maxDepth');
-  console.log('  ✅ P04 PASS: Fork bomb agéntico bloqueado por Depth Guard.');
 }
 
 async function testP01JobPersistence() {
-  console.log('\n[TEST P01] 3. Verificando persistencia y recuperación de jobs en disco...');
   const testJobId = `job_test_persist_${Date.now()}`;
-  const testJob = {
+  jobManager.jobs.clear();
+  jobManager.jobs.set(testJobId, {
     jobId: testJobId,
     sessionID: 'ses_mock_999',
     model: 'opencode/nemotron-3.5-lightning-free',
     task: 'Persistencia determinista JSONL',
+    promptText: 'Prompt íntegro que debe sobrevivir al reinicio',
     status: 'COMPLETED',
     startedAt: Date.now() - 5000,
     completedAt: Date.now(),
@@ -60,86 +86,123 @@ async function testP01JobPersistence() {
     tokens: { input: 100, output: 50, reasoning: 10 },
     diffs: [],
     result: 'Respuesta persistida'
-  };
-
-  jobManager.jobs.set(testJobId, testJob);
+  });
   jobManager._saveJobs();
 
-  assert.ok(fs.existsSync(CONFIG.jobsFile), 'El archivo jobs.jsonl debe existir');
-  const fileLines = fs.readFileSync(CONFIG.jobsFile, 'utf8').split('\n').filter((l) => l.trim().length > 0);
-  const foundInFile = fileLines.some((l) => l.includes(testJobId));
-  assert.ok(foundInFile, 'El nuevo job debe estar escrito en jobs.jsonl');
+  assert.ok(fs.existsSync(CONFIG.jobsFile), 'jobs.jsonl debe existir');
+  const lines = fs.readFileSync(CONFIG.jobsFile, 'utf8').split('\n').filter((l) => l.trim());
+  assert.ok(lines.some((l) => l.includes(testJobId)), 'el job debe estar en disco');
 
-  // Simular reinicio del gestor leyendo desde disco
-  const initialSize = jobManager.jobs.size;
+  // Simular un proceso nuevo: sin esto, el test pasaría aunque _loadJobs no leyera nada.
+  jobManager.jobs.clear();
+  assert.strictEqual(jobManager.jobs.size, 0);
   jobManager._loadJobs();
-  const recoveredJob = jobManager.getJob(testJobId);
-  assert.strictEqual(recoveredJob.found, true, 'El job debe recuperarse tras _loadJobs()');
-  assert.strictEqual(recoveredJob.jobId, testJobId);
-  assert.strictEqual(recoveredJob.status, 'COMPLETED');
-  console.log('  ✅ P01 PASS: Jobs persistidos atómicamente en jobs.jsonl y recuperados con éxito.');
+
+  const recovered = jobManager.getJob(testJobId);
+  assert.strictEqual(recovered.found, true, 'el job debe recuperarse desde disco');
+  assert.strictEqual(recovered.status, 'COMPLETED');
+  assert.strictEqual(recovered.response, 'Respuesta persistida');
+  assert.strictEqual(
+    jobManager.jobs.get(testJobId).promptText,
+    'Prompt íntegro que debe sobrevivir al reinicio',
+    'el prompt íntegro debe persistirse (no el preview de 100 chars)'
+  );
 }
 
-async function testP02FallbackAndTools() {
-  console.log('\n[TEST P02] 4. Verificando cadena de fallback y herramientas unificadas...');
-  // Validar cadena de fallback
-  assert.ok(FREE_FALLBACK_CHAIN.length >= 4, 'La cadena gratuita debe tener al menos 4 modelos');
-  assert.strictEqual(
-    getNextFallbackModel('opencode/nemotron-3.5-lightning-free'),
-    'opencode/nemotron-3.5-super-vl-free'
-  );
-  assert.strictEqual(
-    getNextFallbackModel('opencode/nemotron-3.5-super-vl-free'),
-    'opencode/deepseek-v4.1-flash-free'
-  );
-  assert.strictEqual(
-    getNextFallbackModel('opencode/deepseek-v4.1-flash-free'),
-    'opencode/glm-5.3-flash-free'
-  );
-  assert.strictEqual(
-    getNextFallbackModel('opencode/glm-5.3-flash-free'),
-    null
-  );
-
-  // Validar detección de errores recuperables
-  assert.ok(isRecoverableModelError('OpenCode API error [429 POST /api/session]: Rate limit exceeded'));
+async function testP02FallbackResend() {
+  // Funciones puras
+  assert.strictEqual(getNextFallbackModel('opencode/nemotron-3.5-lightning-free'), 'opencode/nemotron-3.5-super-vl-free');
+  assert.strictEqual(getNextFallbackModel('opencode/nemotron-3.5-super-vl-free'), 'opencode/deepseek-v4.1-flash-free');
+  assert.strictEqual(getNextFallbackModel('opencode/deepseek-v4.1-flash-free'), 'opencode/glm-5.3-flash-free');
+  assert.strictEqual(getNextFallbackModel('opencode/glm-5.3-flash-free'), null);
+  assert.ok(isRecoverableModelError('OpenCode API error [429 POST]: Rate limit exceeded'));
   assert.ok(isRecoverableModelError('503 Service Unavailable: Overloaded'));
   assert.ok(isRecoverableModelError('quota exceeded for free model'));
   assert.strictEqual(isRecoverableModelError('SyntaxError: unexpected token'), false);
 
-  // Validar TOOLS unificado (8 herramientas registradas con cero código muerto)
-  assert.strictEqual(TOOLS.length, 8, 'Debe haber exactamente 8 herramientas registradas en src/tools.js');
-  const toolNames = TOOLS.map((t) => t.name);
-  assert.ok(toolNames.includes('openbridge_list_models'));
-  assert.ok(toolNames.includes('openbridge_delegate_task'));
-  assert.ok(toolNames.includes('openbridge_start_task'));
-  assert.ok(toolNames.includes('openbridge_check_task'));
-  assert.ok(toolNames.includes('openbridge_cancel_task'));
-  assert.ok(toolNames.includes('openbridge_list_active_tasks'));
-  assert.ok(toolNames.includes('openbridge_get_diff'));
-  assert.ok(toolNames.includes('openbridge_status'));
+  // Integración: createSession OK + sendPrompt 429 debe crear OTRA sesión y reenviar.
+  const original = {
+    createSession: client.createSession,
+    sendPrompt: client.sendPrompt,
+    waitForCompletion: client.waitForCompletion,
+    interruptSession: client.interruptSession
+  };
+  let creates = 0;
+  const sends = [];
+  try {
+    client.createSession = async () => {
+      creates += 1;
+      return `ses_fb_${creates}`;
+    };
+    client.sendPrompt = async (sessionID) => {
+      sends.push(sessionID);
+      if (sends.length === 1) {
+        throw new Error('OpenCode API error [429 POST /api/session/x/prompt]: Rate limit exceeded');
+      }
+    };
+    client.interruptSession = async () => null;
+    client.waitForCompletion = async (sessionID) => ({
+      sessionID,
+      outcome: 'succeeded',
+      model: { id: 'mock-model' },
+      text: 'ok',
+      tokens: { input: 1, output: 1, reasoning: 0 },
+      diffs: [],
+      durationMs: 1
+    });
 
-  // Verificar que openbridge_delegate_task y start_task incluyan call_depth
-  const delegateTool = TOOLS.find((t) => t.name === 'openbridge_delegate_task');
-  assert.ok(delegateTool.parameters.call_depth, 'openbridge_delegate_task debe declarar call_depth');
-  const startTool = TOOLS.find((t) => t.name === 'openbridge_start_task');
-  assert.ok(startTool.parameters.call_depth, 'openbridge_start_task debe declarar call_depth');
+    const task = 'briefing largo que NO debe truncarse al reenviar: ' + 'x'.repeat(400);
+    const started = await jobManager.startJob({ task, model: 'opencode/nemotron-3.5-lightning-free' });
+    await new Promise((r) => setTimeout(r, 120));
+    const final = jobManager.getJob(started.jobId);
 
-  console.log('  ✅ P02 PASS: Cadena de fallback cableada y 8 herramientas unificadas en src/tools.js sin código muerto.');
+    assert.strictEqual(creates, 2, 'debe crear una segunda sesión tras el 429');
+    assert.deepStrictEqual(sends, ['ses_fb_1', 'ses_fb_2'], 'debe reenviar el prompt a la sesión nueva');
+    assert.strictEqual(started.sessionID, 'ses_fb_2', 'el job debe apuntar a la sesión que sí recibió el prompt');
+    assert.strictEqual(started.model, 'opencode/nemotron-3.5-super-vl-free', 'debe reportar el modelo de fallback');
+    assert.strictEqual(final.status, 'COMPLETED');
+    assert.strictEqual(jobManager.jobs.get(started.jobId).promptText, task, 'el prompt íntegro debe persistirse');
+  } finally {
+    Object.assign(client, original);
+  }
+}
+
+async function testToolsUnified() {
+  assert.strictEqual(TOOLS.length, 8, 'deben existir exactamente 8 tools');
+  assert.strictEqual(typeof registerAllTools, 'function', 'registerAllTools debe exportarse');
+  const names = TOOLS.map((t) => t.name).sort();
+  assert.deepStrictEqual(names, [
+    'openbridge_cancel_task',
+    'openbridge_check_task',
+    'openbridge_delegate_task',
+    'openbridge_get_diff',
+    'openbridge_list_active_tasks',
+    'openbridge_list_models',
+    'openbridge_start_task',
+    'openbridge_status'
+  ]);
+  for (const toolName of ['openbridge_delegate_task', 'openbridge_start_task']) {
+    assert.ok(TOOLS.find((t) => t.name === toolName).parameters.call_depth, `${toolName} debe declarar call_depth`);
+  }
 }
 
 async function runAll() {
+  await test('P03 · token dinámico + legacy gateado', testP03DynamicAuth);
+  await test('P04 · guardián de recursión (default-deny)', testP04RecursionGuard);
+  await test('P01 · persistencia real con Map limpio', testP01JobPersistence);
+  await test('P02 · fallback reenvía prompt (integración)', testP02FallbackResend);
+  await test('P05 · 8 tools unificadas', testToolsUnified);
+
   try {
-    await testP03DynamicAuth();
-    await testP04RecursionGuard();
-    await testP01JobPersistence();
-    await testP02FallbackAndTools();
-    console.log('\n🎯 [TODO CERTIFICADO] Todas las grietas señaladas por DeepSeek han sido remediadas y verificadas.');
-    process.exit(0);
-  } catch (err) {
-    console.error('\n❌ ERROR EN CERTIFICACIÓN:', err);
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  } catch {}
+
+  if (failures > 0) {
+    console.error(`\n❌ ${failures} prueba(s) fallaron. La suite NO certifica nada que no haya ejecutado.`);
     process.exit(1);
   }
+  console.log('\n✅ Suite completa: 5/5. Certifica persistencia real, fallback con reenvío, default-deny de recursión y token dinámico.');
+  process.exit(0);
 }
 
 runAll();

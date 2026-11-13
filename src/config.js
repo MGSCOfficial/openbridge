@@ -77,6 +77,8 @@ export const CONFIG = {
   cliPath: resolveCliPath(),
   dataDir,
   jobsFile: path.join(dataDir, 'jobs.jsonl'),
+  jobsRetention: parseInt(process.env.OPENBRIDGE_JOBS_RETENTION || '200', 10),
+  allowNested: process.env.OPENBRIDGE_ALLOW_NESTED === '1',
   maxDepth: parseInt(process.env.OPENBRIDGE_MAX_DEPTH || '2', 10)
 };
 
