@@ -9,6 +9,32 @@ export const FREE_FALLBACK_CHAIN = [
   'opencode/glm-5.3-flash-free'
 ];
 
+export function getNextFallbackModel(currentModel) {
+  const idx = FREE_FALLBACK_CHAIN.indexOf(currentModel);
+  if (idx !== -1 && idx + 1 < FREE_FALLBACK_CHAIN.length) {
+    return FREE_FALLBACK_CHAIN[idx + 1];
+  }
+  return null;
+}
+
+export function isRecoverableModelError(err) {
+  if (!err) return false;
+  const msg = (typeof err === 'string' ? err : (err.message || '')).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('ratelimit') ||
+    msg.includes('too many requests') ||
+    msg.includes('quota') ||
+    msg.includes('overloaded') ||
+    msg.includes('503') ||
+    msg.includes('502') ||
+    msg.includes('504') ||
+    msg.includes('resource exhausted') ||
+    msg.includes('temporarily unavailable')
+  );
+}
+
 class OpenCodeClient {
   constructor() {
     this.baseUrl = getBaseUrl();

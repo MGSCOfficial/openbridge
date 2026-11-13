@@ -46,6 +46,13 @@ export async function ensureServerRunning() {
     return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
   }
 
+  // 1b. Backward-compatibility: Check if server is running with legacy token
+  const legacyCheck = await checkServerAuth('openbridge_local_token_2026');
+  if (legacyCheck.ok) {
+    activeAuthPassword = 'openbridge_local_token_2026';
+    return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
+  }
+
   // 2. If already alive on port (e.g. desktop app with auto-generated token)
   const alive = await isServerAlive();
   if (alive) {
