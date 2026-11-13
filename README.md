@@ -152,18 +152,40 @@ Agrega la siguiente entrada en la configuración de servidores MCP de Antigravit
 
 ### 4. Rotar el token del daemon
 
+El daemon **es hijo del proceso MCP**: `ensureServerRunning()` lo lanza con
+`OPENCODE_SERVER_PASSWORD=CONFIG.serverPassword` y lo mata en `SIGINT`/`SIGTERM`
+(`stopSpawnedServer()`). Por eso la rotación no se hace a mano con
+`opencode serve`: se hace **reiniciando el MCP**.
+
 ```bash
-# 1. Leer el token generado
-cat ~/.openbridge/token
+# 1. Confirmar qué token tiene el daemon actualmente (el legacy devuelve 200 si no rotó)
+curl -s -o /dev/null -w "%{http_code}\n" -u "opencode:$(cat ~/.openbridge/token)" http://127.0.0.1:4096/api/info
 
-# 2. Reiniciar OpenCode con ese token
-opencode serve --port 4096 --password "$(cat ~/.openbridge/token)"
+# 2. Detener el MCP de OpenBridge de forma ordenada (NO matar el proceso a la fuerza).
+#    Eso termina el daemon hijo y, con él, cualquier sesión de worker en vuelo.
 
-# 3. Eliminar OPENBRIDGE_ALLOW_LEGACY del entorno del MCP y reiniciarlo
+# 3. Arrancar el MCP: vuelve a lanzar el daemon con el token de ~/.openbridge/token.
+
+# 4. Verificar que rotó de verdad (ver checklist abajo).
 ```
 
-Mientras el daemon siga autenticando con el token viejo, el secreto efectivo es
-el viejo, aunque el código ya no lo adopte sin permiso explícito.
+Checklist de verificación tras el reinicio:
+
+| Comprobación | Esperado |
+| :--- | :--- |
+| PID dueño del puerto `4096` | **distinto** del anterior |
+| `Authorization` con `~/.openbridge/token` en `/api/info` | `200` |
+| `Authorization` con `openbridge_local_token_2026` en `/api/info` | `401` |
+| Log del MCP | sin `[OpenBridge Auth] ... token legacy` |
+
+Si el token legacy sigue devolviendo `200`, el daemon viejo sobrevivió como
+huérfano (típico de un kill forzado en Windows, que no propaga al hijo). En ese
+caso: matar el `opencode.exe serve` huérfano, liberar el puerto y reiniciar el
+MCP. Con `OPENBRIDGE_ALLOW_LEGACY=1` activo el MCP adoptaría el token viejo **en
+silencio salvo el warning**, así que la verificación del `401` es obligatoria.
+
+Solo cuando el paso 4 esté en verde: eliminar `OPENBRIDGE_ALLOW_LEGACY` del
+`env` del MCP. A partir de ahí el puente de migración deja de existir.
 
 ---
 

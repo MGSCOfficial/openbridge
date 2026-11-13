@@ -82,15 +82,20 @@ bridge  (gate ON):   adoptedLegacy = true
 
 ## 3. Migración pendiente (acción del operador)
 
-El daemon actual (PID 8600) sigue autenticando con el token legacy, por eso la configuración MCP incluye temporalmente `OPENBRIDGE_ALLOW_LEGACY=1`. Para retirar el puente:
+El daemon actual (PID 8600) sigue autenticando con el token legacy, por eso la configuración MCP incluye temporalmente `OPENBRIDGE_ALLOW_LEGACY=1`.
 
-1. Leer el token dinámico: `Get-Content ~/.openbridge/token`.
-2. Reiniciar el daemon con ese token:
-   `opencode serve --port 4096 --password <token>`
-3. Eliminar `OPENBRIDGE_ALLOW_LEGACY` de `~/.gemini/antigravity/mcp_config.json`.
-4. Reiniciar el MCP de OpenBridge en Antigravity.
+**El daemon es hijo del MCP**, no un servicio independiente: `ensureServerRunning()` lo lanza con `OPENCODE_SERVER_PASSWORD=CONFIG.serverPassword` (`src/server-manager.js:82-98`) y `stopSpawnedServer()` lo termina en `SIGINT`/`SIGTERM`. Arrancarlo a mano con `opencode serve` deja un huérfano que el MCP no gestiona y que sobrevive a sus reinicios. La rotación se hace **reiniciando el MCP**:
 
-Mientras el paso 2 no ocurra, el token efectivo sigue siendo el legacy. El código ya no lo usa sin permiso explícito.
+1. Detener el MCP de OpenBridge de forma ordenada (no kill forzado). Esto también termina el daemon hijo y **cualquier sesión de worker en vuelo**, incluida la que esté ejecutando esta migración.
+2. Arrancarlo de nuevo: respawnea el daemon con `OPENCODE_SERVER_PASSWORD` tomado de `~/.openbridge/token`.
+3. Verificar la rotación (obligatorio):
+   - PID dueño de `:4096` distinto del anterior;
+   - `Authorization: Basic opencode:<token nuevo>` en `/api/info` → `200`;
+   - `Authorization: Basic opencode:openbridge_local_token_2026` → `401`;
+   - log del MCP sin `[OpenBridge Auth] ... token legacy`.
+4. Solo si el punto 3 está en verde, eliminar `OPENBRIDGE_ALLOW_LEGACY` de `~/.gemini/antigravity/mcp_config.json` y reiniciar el MCP otra vez.
+
+Si el token legacy sigue devolviendo `200` tras el reinicio, el daemon viejo quedó huérfano (un kill forzado en Windows no propaga al hijo): matar el `opencode.exe serve` huérfano, liberar el puerto y repetir. Con el puente activo el MCP adoptaría el token viejo con solo un warning, así que la comprobación del `401` no es opcional.
 
 ---
 
@@ -114,4 +119,5 @@ La suite ahora usa `OPENBRIDGE_DATA_DIR` aislado: ya no contamina `~/.openbridge
 1. **`call_depth` no es certificable** — ver D5.
 2. **Dashboard sin auth** — bindea `127.0.0.1` (`dashboard.js:1616`), pero cualquier proceso local puede leer resultados.
 3. **`jobs.jsonl` sin cifrar** — contiene previews y resultados. Es un directorio de usuario, no un almacén seguro.
-4. **Jobs falsos de la suite anterior** — `job_test_persist_*` siguen en `~/.openbridge/jobs.jsonl`. Se eliminan al reiniciar el MCP, porque el proceso vivo los tiene en memoria y los reescribiría.
+4. **Ciclo de vida acoplado (nuevo, P07)** — el daemon `:4096` es hijo del proceso MCP. Reiniciar el MCP mata a todos los workers en vuelo, y un kill forzado deja el daemon huérfano: el MCP nuevo encontraría el puerto ocupado con el token viejo y, con `OPENBRIDGE_ALLOW_LEGACY=1`, lo adoptaría con solo un warning. Mitigación actual: checklist de verificación de la sección 3. Mitigación de fondo: daemon independiente (servicio o proceso desacoplado) gestionado por PID file, no por `child_process`.
+5. **Jobs falsos de la suite anterior** — `job_test_persist_*` siguen en `~/.openbridge/jobs.jsonl`. Se eliminan al reiniciar el MCP, porque el proceso vivo los tiene en memoria y los reescribiría.
