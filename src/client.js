@@ -9,12 +9,69 @@ export const FREE_FALLBACK_CHAIN = [
   'opencode/glm-5.3-flash-free'
 ];
 
-export function getNextFallbackModel(currentModel) {
-  const idx = FREE_FALLBACK_CHAIN.indexOf(currentModel);
-  if (idx !== -1 && idx + 1 < FREE_FALLBACK_CHAIN.length) {
-    return FREE_FALLBACK_CHAIN[idx + 1];
+const MODEL_HEALTH = new Map();
+const COOLDOWN_DURATION_MS = parseInt(process.env.OPENBRIDGE_CIRCUIT_BREAKER_MS || '60000', 10);
+const MAX_FAILURES_BEFORE_COOLDOWN = 2;
+
+export function recordModelFailure(model, isRecoverable = true) {
+  if (!model || !isRecoverable) return;
+  const health = MODEL_HEALTH.get(model) || { consecutiveFailures: 0, cooldownUntil: 0 };
+  health.consecutiveFailures += 1;
+  if (health.consecutiveFailures >= MAX_FAILURES_BEFORE_COOLDOWN) {
+    health.cooldownUntil = Date.now() + COOLDOWN_DURATION_MS;
+    console.warn(
+      `[Circuit Breaker] Modelo ${model} en enfriamiento hasta ${new Date(health.cooldownUntil).toISOString()} tras ${health.consecutiveFailures} fallos.`
+    );
   }
-  return null;
+  MODEL_HEALTH.set(model, health);
+}
+
+export function recordModelSuccess(model) {
+  if (!model) return;
+  const health = MODEL_HEALTH.get(model);
+  if (health) {
+    health.consecutiveFailures = 0;
+    health.cooldownUntil = 0;
+  }
+}
+
+export function isModelInCooldown(model) {
+  const health = MODEL_HEALTH.get(model);
+  if (!health || !health.cooldownUntil) return false;
+  if (Date.now() >= health.cooldownUntil) {
+    health.cooldownUntil = 0;
+    health.consecutiveFailures = 0;
+    return false;
+  }
+  return true;
+}
+
+export function getNextFallbackModel(currentModel) {
+  const startIdx = FREE_FALLBACK_CHAIN.indexOf(currentModel);
+  const candidates = startIdx !== -1 ? FREE_FALLBACK_CHAIN.slice(startIdx + 1) : FREE_FALLBACK_CHAIN;
+  
+  // 1. Priorizar candidatos que no estén en enfriamiento
+  for (const candidate of candidates) {
+    if (!isModelInCooldown(candidate)) {
+      return candidate;
+    }
+  }
+
+  // 2. Si todos los candidatos están en enfriamiento, retornar el siguiente inmediato como último recurso
+  return candidates[0] || null;
+}
+
+export function getModelHealthMap() {
+  const result = {};
+  for (const model of FREE_FALLBACK_CHAIN) {
+    const health = MODEL_HEALTH.get(model) || { consecutiveFailures: 0, cooldownUntil: 0 };
+    result[model] = {
+      consecutiveFailures: health.consecutiveFailures,
+      inCooldown: isModelInCooldown(model),
+      cooldownRemainingMs: Math.max(0, health.cooldownUntil - Date.now())
+    };
+  }
+  return result;
 }
 
 export function isRecoverableModelError(err) {

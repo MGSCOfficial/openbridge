@@ -44,10 +44,16 @@ function resolveDataDir() {
 }
 
 function resolveServerPassword(dataDir) {
-  if (process.env.OPENCODE_SERVER_PASSWORD) {
-    return process.env.OPENCODE_SERVER_PASSWORD;
-  }
   const tokenFile = path.join(dataDir, 'token');
+  if (process.env.OPENCODE_SERVER_PASSWORD) {
+    const pwd = process.env.OPENCODE_SERVER_PASSWORD;
+    if (!fs.existsSync(tokenFile)) {
+      try {
+        fs.writeFileSync(tokenFile, pwd, { mode: 0o600 });
+      } catch {}
+    }
+    return pwd;
+  }
   if (fs.existsSync(tokenFile)) {
     try {
       const stored = fs.readFileSync(tokenFile, 'utf8').trim();
@@ -77,6 +83,9 @@ export const CONFIG = {
   cliPath: resolveCliPath(),
   dataDir,
   jobsFile: path.join(dataDir, 'jobs.jsonl'),
+  payloadsDir: path.join(dataDir, 'payloads'),
+  payloadTtlDays: parseInt(process.env.OPENBRIDGE_PAYLOAD_TTL_DAYS || '7', 10),
+  dashboardAuthEnabled: process.env.OPENBRIDGE_DASHBOARD_NO_AUTH !== '1',
   jobsRetention: parseInt(process.env.OPENBRIDGE_JOBS_RETENTION || '200', 10),
   allowNested: process.env.OPENBRIDGE_ALLOW_NESTED === '1',
   maxDepth: parseInt(process.env.OPENBRIDGE_MAX_DEPTH || '2', 10)

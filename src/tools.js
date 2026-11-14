@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { client } from './client.js';
+import { client, getModelHealthMap } from './client.js';
 import { CONFIG } from './config.js';
 import { checkServerAuth } from './server-manager.js';
 import { jobManager } from './job-manager.js';
@@ -244,6 +244,9 @@ export const TOOLS = [
                   defaultModel: CONFIG.defaultModel,
                   multimodalModel: CONFIG.multimodalModel,
                   maxRecursionDepth: CONFIG.maxDepth,
+                  dashboardAuth: CONFIG.dashboardAuthEnabled ? 'ENABLED' : 'DISABLED',
+                  payloadSegregation: 'ACTIVE',
+                  modelPoolHealth: getModelHealthMap(),
                   details: auth.data || auth.error || 'Server ready'
                 },
                 null,

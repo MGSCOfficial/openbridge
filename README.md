@@ -149,6 +149,9 @@ Agrega la siguiente entrada en la configuración de servidores MCP de Antigravit
 | `OPENBRIDGE_ALLOW_NESTED` | `0` | Permite que un worker delegue a su vez. Desactivado por seguridad |
 | `OPENBRIDGE_MAX_DEPTH` | `2` | Techo de profundidad cuando el nesting está habilitado |
 | `OPENBRIDGE_JOBS_RETENTION` | `200` | Máximo de jobs persistidos en `jobs.jsonl` |
+| `OPENBRIDGE_PAYLOAD_TTL_DAYS` | `7` | Días de retención para payloads pesados en `payloads/<id>.json` |
+| `OPENBRIDGE_CIRCUIT_BREAKER_MS` | `60000` | Tiempo de enfriamiento proactivo para modelos con 2 fallos consecutivos |
+| `OPENBRIDGE_DASHBOARD_NO_AUTH` | `0` | Desactiva autenticación en el Dashboard `:4098` si se fija en `1` |
 
 ### 4. Rotar el token del daemon
 

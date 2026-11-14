@@ -2,7 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { client, getNextFallbackModel, isRecoverableModelError } from './client.js';
+import {
+  client,
+  getNextFallbackModel,
+  isRecoverableModelError,
+  recordModelFailure,
+  recordModelSuccess,
+  isModelInCooldown
+} from './client.js';
 import { CONFIG } from './config.js';
 import { createSandbox, cleanupSandbox } from './sandbox-manager.js';
 
@@ -12,6 +19,61 @@ class JobManager extends EventEmitter {
     this.jobs = new Map();
     this._loadJobs();
     this.recoverPendingJobs().catch(() => {});
+  }
+
+  _ensurePayloadsDir() {
+    if (CONFIG.payloadsDir && !fs.existsSync(CONFIG.payloadsDir)) {
+      try {
+        fs.mkdirSync(CONFIG.payloadsDir, { recursive: true });
+      } catch {}
+    }
+  }
+
+  _savePayload(jobId, payload) {
+    if (!CONFIG.payloadsDir) return;
+    try {
+      this._ensurePayloadsDir();
+      const filePath = path.join(CONFIG.payloadsDir, `${jobId}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (err) {
+      console.error(`[JobManager] Error al guardar payload para ${jobId}:`, err.message);
+    }
+  }
+
+  _loadPayload(jobId) {
+    if (!CONFIG.payloadsDir) return null;
+    const filePath = path.join(CONFIG.payloadsDir, `${jobId}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch {
+      return null;
+    }
+  }
+
+  _prunePayloads() {
+    if (!CONFIG.payloadsDir || !fs.existsSync(CONFIG.payloadsDir)) return;
+    try {
+      const ttlMs = (CONFIG.payloadTtlDays || 7) * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const files = fs.readdirSync(CONFIG.payloadsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(CONFIG.payloadsDir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (now - stat.mtimeMs > ttlMs) {
+            const jobId = file.replace('.json', '');
+            const job = this.jobs.get(jobId);
+            if (!job || job.status !== 'RUNNING') {
+              fs.unlinkSync(filePath);
+            }
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.error('[JobManager] Error al purgar payloads antiguos:', err.message);
+    }
   }
 
   /**
@@ -32,11 +94,31 @@ class JobManager extends EventEmitter {
 
   _saveJobs() {
     this._pruneJobs();
+    this._prunePayloads();
     try {
       if (!CONFIG.jobsFile) return;
       const tmpFile = `${CONFIG.jobsFile}.tmp`;
       const lines = Array.from(this.jobs.values())
-        .map((j) => JSON.stringify(j))
+        .map((j) => {
+          if (j.result || j.diffs?.length > 0 || j.promptText) {
+            this._savePayload(j.jobId, {
+              promptText: j.promptText,
+              result: j.result,
+              diffs: j.diffs,
+              savedAt: Date.now()
+            });
+          }
+          const record = { ...j };
+          if (record.result && record.result.length > 300) {
+            record.resultPreview = record.result.slice(0, 300) + '...';
+            delete record.result;
+          }
+          if (record.diffs && record.diffs.length > 5) {
+            record.diffsCount = record.diffs.length;
+            record.diffs = record.diffs.slice(0, 5);
+          }
+          return JSON.stringify(record);
+        })
         .join('\n');
       fs.writeFileSync(tmpFile, lines, 'utf8');
       fs.renameSync(tmpFile, CONFIG.jobsFile);
@@ -81,7 +163,6 @@ class JobManager extends EventEmitter {
         const isIdle = session && session.time?.idle && (!session.time.busy || session.time.idle >= session.time.busy);
 
         if (!isIdle) {
-          // La sesión sigue trabajando: retomar el seguimiento con el prompt íntegro.
           const recoverDir = job.sandboxDir && fs.existsSync(job.sandboxDir) ? job.sandboxDir : null;
           this._trackJobBackground(job, 600, recoverDir, job.promptText || '');
           continue;
@@ -89,7 +170,6 @@ class JobManager extends EventEmitter {
 
         const result = await client.waitForCompletion(job.sessionID, 5000).catch(() => null);
         if (!result) {
-          // Idle sin resultado recuperable NO es éxito: sería un falso COMPLETED.
           throw new Error('[RECOVERY_INCOMPLETE] La sesión está idle pero no se pudo recolectar el resultado');
         }
 
@@ -101,6 +181,13 @@ class JobManager extends EventEmitter {
         job.tokens = result.tokens;
         job.diffs = result.diffs || [];
         job.result = result.text;
+        recordModelSuccess(job.modelUsed || job.model);
+        this._savePayload(job.jobId, {
+          promptText: job.promptText,
+          result: job.result,
+          diffs: job.diffs,
+          completedAt: job.completedAt
+        });
       } catch (err) {
         job.status = 'FAILED';
         job.completedAt = Date.now();
@@ -121,10 +208,6 @@ class JobManager extends EventEmitter {
       call_depth = 0
     } = options;
 
-    // P04: Guardián de Recursión Agéntica (Depth Guard).
-    // `call_depth` lo declara el cliente y por tanto NO es confiable: sirve como
-    // primer filtro, no como certificación. La delegación anidada está prohibida
-    // por defecto para que un worker no pueda reiniciar el contador pasando 0.
     const declaredDepth = Number.isFinite(call_depth) && call_depth > 0 ? Math.floor(call_depth) : 0;
     if (declaredDepth > 0 && !CONFIG.allowNested) {
       throw new Error(
@@ -150,12 +233,20 @@ class JobManager extends EventEmitter {
     }
 
     let activeModel = model;
+
+    // Circuit Breaker: si el modelo objetivo está en enfriamiento, conmutar proactivamente
+    if (isModelInCooldown(activeModel)) {
+      const nextHealthy = getNextFallbackModel(activeModel);
+      if (nextHealthy && nextHealthy !== activeModel) {
+        console.warn(
+          `[Circuit Breaker] Modelo ${activeModel} en cooldown. Conmutando proactivamente a ${nextHealthy}...`
+        );
+        activeModel = nextHealthy;
+      }
+    }
+
     let sessionID = null;
 
-    // P02: crear sesión + despachar prompt como una sola unidad atómica.
-    // sessionID SOLO se fija cuando el prompt fue aceptado. Si se asigna antes y
-    // sendPrompt falla, el bucle termina sin reintentar y el job queda "COMPLETED"
-    // sobre una sesión vacía (falso éxito silencioso).
     while (!sessionID) {
       let candidateSessionID = null;
       try {
@@ -170,6 +261,7 @@ class JobManager extends EventEmitter {
         if (candidateSessionID) {
           await client.interruptSession(candidateSessionID).catch(() => {});
         }
+        recordModelFailure(activeModel, isRecoverableModelError(err));
         const nextModel = getNextFallbackModel(activeModel);
         if (nextModel && isRecoverableModelError(err)) {
           console.warn(
@@ -191,8 +283,6 @@ class JobManager extends EventEmitter {
       model: activeModel,
       initialModel: model,
       task: task.slice(0, 100) + (task.length > 100 ? '...' : ''),
-      // Prompt completo: la recuperación post-reinicio lo necesita íntegro.
-      // `task` es solo una vista previa para la UI.
       promptText,
       readOnly: read_only,
       sandboxDir: read_only ? effectiveDir : null,
@@ -238,9 +328,16 @@ class JobManager extends EventEmitter {
         job.tokens = result.tokens;
         job.diffs = result.diffs || [];
         job.result = result.text;
+        recordModelSuccess(job.modelUsed || job.model);
+        this._savePayload(job.jobId, {
+          promptText: job.promptText,
+          result: job.result,
+          diffs: job.diffs,
+          completedAt: job.completedAt
+        });
         this.emit('task_completed', job);
       } catch (err) {
-        // P02: Fallback durante la ejecución
+        recordModelFailure(job.model, isRecoverableModelError(err));
         const nextModel = getNextFallbackModel(job.model);
         if (nextModel && isRecoverableModelError(err) && !job.fallbackAttempted) {
           job.fallbackAttempted = true;
@@ -281,6 +378,10 @@ class JobManager extends EventEmitter {
       return { found: false, error: `No se encontró la tarea con ID ${jobId}` };
     }
 
+    const payload = this._loadPayload(jobId);
+    const effectiveResult = job.result || payload?.result || job.resultPreview || null;
+    const effectiveDiffs = (job.diffs && job.diffs.length > 0) ? job.diffs : (payload?.diffs || []);
+
     const currentDuration = job.completedAt
       ? job.durationSeconds
       : Math.round((Date.now() - job.startedAt) / 1000);
@@ -299,9 +400,9 @@ class JobManager extends EventEmitter {
       tokens: job.tokens,
       costUsd: 0,
       geminiQuotaSaved: '100%',
-      diffsCount: job.diffs?.length || 0,
-      diffs: job.diffs,
-      response: job.result,
+      diffsCount: effectiveDiffs.length,
+      diffs: effectiveDiffs,
+      response: effectiveResult,
       error: job.error
     };
   }

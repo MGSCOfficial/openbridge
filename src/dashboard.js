@@ -1418,6 +1418,101 @@ function renderDashboardHtml() {
 </html>`;
 }
 
+function renderAuthGatewayHtml() {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenBridge Console — Acceso Protegido</title>
+  <style>
+    body {
+      background: #06080d;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #0d121c;
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+    h2 { margin: 0 0 12px 0; font-size: 1.25rem; font-weight: 600; color: #38bdf8; }
+    p { color: #94a3b8; font-size: 0.875rem; margin-bottom: 24px; line-height: 1.5; }
+    input {
+      width: 100%;
+      background: #06080d;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      background: #38bdf8;
+      color: #06080d;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #7dd3fc; }
+    .hint { font-size: 0.75rem; color: #64748b; margin-top: 16px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>OpenBridge Console</h2>
+    <p>Acceso local protegido por token. Ingresa el token de seguridad generado en <code>~/.openbridge/token</code> para desbloquear la telemetría.</p>
+    <form method="GET" action="/">
+      <input type="password" name="token" placeholder="Introduce token criptográfico" required autofocus />
+      <button type="submit">Autenticar y Entrar</button>
+    </form>
+    <div class="hint">Token guardado en ~/.openbridge/token</div>
+  </div>
+</body>
+</html>`;
+}
+
+function checkDashboardAuth(req, url) {
+  if (!CONFIG.dashboardAuthEnabled) return true;
+
+  // 1. Header Authorization: Bearer <token>
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const bearer = authHeader.slice(7).trim();
+    if (bearer === CONFIG.serverPassword) return true;
+  }
+
+  // 2. Query param ?token=<token>
+  const queryToken = url.searchParams.get('token');
+  if (queryToken && queryToken.trim() === CONFIG.serverPassword) {
+    return true;
+  }
+
+  // 3. Cookie openbridge_token=<token>
+  const cookieHeader = req.headers.cookie || '';
+  const match = cookieHeader.match(/openbridge_token=([a-f0-9]+)/i);
+  if (match && match[1] === CONFIG.serverPassword) {
+    return true;
+  }
+
+  return false;
+}
+
 export function broadcastDashboardEvent(eventType, payload) {
   if (sseClients.size === 0) return;
   const dataStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -1433,10 +1528,44 @@ export function startDashboardServer(port = 4098) {
   serverInstance = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
 
+    // Comprobación de autenticación
+    const isAuth = checkDashboardAuth(req, url);
+    const queryToken = url.searchParams.get('token');
+
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      if (!isAuth) {
+        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(renderAuthGatewayHtml());
+        return;
+      }
+
+      const headers = {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache'
+      };
+      if (queryToken && queryToken.trim() === CONFIG.serverPassword) {
+        headers['Set-Cookie'] = `openbridge_token=${CONFIG.serverPassword}; Path=/; HttpOnly; SameSite=Strict`;
+      }
+      res.writeHead(200, headers);
       res.end(renderDashboardHtml());
       return;
+    }
+
+    // Proteger todas las rutas API
+    if (url.pathname.startsWith('/api/')) {
+      if (!isAuth) {
+        res.writeHead(401, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(
+          JSON.stringify({
+            error: 'Unauthorized',
+            message: 'Acceso no autorizado. Provee el token generado en ~/.openbridge/token o usa OPENBRIDGE_DASHBOARD_NO_AUTH=1.'
+          })
+        );
+        return;
+      }
     }
 
     if (url.pathname === '/api/status') {
