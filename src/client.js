@@ -13,25 +13,48 @@ const MODEL_HEALTH = new Map();
 const COOLDOWN_DURATION_MS = parseInt(process.env.OPENBRIDGE_CIRCUIT_BREAKER_MS || '60000', 10);
 const MAX_FAILURES_BEFORE_COOLDOWN = 2;
 
+/**
+ * `waitForCompletion` devuelve `model.id` sin proveedor ("nemotron-3.5-..."),
+ * mientras la cadena usa "opencode/nemotron-3.5-...". Sin normalizar, el éxito
+ * se anota en una clave fantasma y el cooldown del modelo real nunca se limpia.
+ */
+function resolveHealthKeys(model) {
+  if (!model) return [];
+  if (FREE_FALLBACK_CHAIN.includes(model)) return [model];
+  const chainKey = FREE_FALLBACK_CHAIN.find((m) => m.endsWith('/' + model));
+  return chainKey ? [model, chainKey] : [model];
+}
+
 export function recordModelFailure(model, isRecoverable = true) {
   if (!model || !isRecoverable) return;
-  const health = MODEL_HEALTH.get(model) || { consecutiveFailures: 0, cooldownUntil: 0 };
-  health.consecutiveFailures += 1;
-  if (health.consecutiveFailures >= MAX_FAILURES_BEFORE_COOLDOWN) {
-    health.cooldownUntil = Date.now() + COOLDOWN_DURATION_MS;
+  const keys = resolveHealthKeys(model);
+  let cooledDown = false;
+  for (const key of keys) {
+    const health = MODEL_HEALTH.get(key) || { consecutiveFailures: 0, cooldownUntil: 0 };
+    health.consecutiveFailures += 1;
+    if (health.consecutiveFailures >= MAX_FAILURES_BEFORE_COOLDOWN) {
+      health.cooldownUntil = Date.now() + COOLDOWN_DURATION_MS;
+      cooledDown = true;
+    }
+    MODEL_HEALTH.set(key, health);
+  }
+  if (cooledDown) {
     console.warn(
-      `[Circuit Breaker] Modelo ${model} en enfriamiento hasta ${new Date(health.cooldownUntil).toISOString()} tras ${health.consecutiveFailures} fallos.`
+      `[Circuit Breaker] Modelo ${keys[keys.length - 1]} en enfriamiento hasta ${new Date(
+        MODEL_HEALTH.get(keys[keys.length - 1]).cooldownUntil
+      ).toISOString()} tras ${MAX_FAILURES_BEFORE_COOLDOWN} fallos.`
     );
   }
-  MODEL_HEALTH.set(model, health);
 }
 
 export function recordModelSuccess(model) {
   if (!model) return;
-  const health = MODEL_HEALTH.get(model);
-  if (health) {
-    health.consecutiveFailures = 0;
-    health.cooldownUntil = 0;
+  for (const key of resolveHealthKeys(model)) {
+    const health = MODEL_HEALTH.get(key);
+    if (health) {
+      health.consecutiveFailures = 0;
+      health.cooldownUntil = 0;
+    }
   }
 }
 

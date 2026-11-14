@@ -17,6 +17,7 @@ class JobManager extends EventEmitter {
   constructor() {
     super();
     this.jobs = new Map();
+    this._lastPayloadPrune = 0;
     this._loadJobs();
     this.recoverPendingJobs().catch(() => {});
   }
@@ -53,6 +54,9 @@ class JobManager extends EventEmitter {
 
   _prunePayloads() {
     if (!CONFIG.payloadsDir || !fs.existsSync(CONFIG.payloadsDir)) return;
+    // La purga recorre el directorio: no hace falta en cada guardado.
+    if (Date.now() - this._lastPayloadPrune < 10 * 60 * 1000) return;
+    this._lastPayloadPrune = Date.now();
     try {
       const ttlMs = (CONFIG.payloadTtlDays || 7) * 24 * 60 * 60 * 1000;
       const now = Date.now();
@@ -100,13 +104,19 @@ class JobManager extends EventEmitter {
       const tmpFile = `${CONFIG.jobsFile}.tmp`;
       const lines = Array.from(this.jobs.values())
         .map((j) => {
-          if (j.result || j.diffs?.length > 0 || j.promptText) {
-            this._savePayload(j.jobId, {
-              promptText: j.promptText,
-              result: j.result,
-              diffs: j.diffs,
-              savedAt: Date.now()
-            });
+          // El payload se escribe una vez (al completar o al encontrar el job
+          // cargado sin payload). Reescribirlo en cada guardado multiplicaba el
+          // I/O por el número de jobs retenidos.
+          if (CONFIG.payloadsDir && (j.result || j.diffs?.length > 0)) {
+            const payloadPath = path.join(CONFIG.payloadsDir, `${j.jobId}.json`);
+            if (!fs.existsSync(payloadPath)) {
+              this._savePayload(j.jobId, {
+                promptText: j.promptText,
+                result: j.result,
+                diffs: j.diffs,
+                savedAt: Date.now()
+              });
+            }
           }
           const record = { ...j };
           if (record.result && record.result.length > 300) {

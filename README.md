@@ -1,4 +1,4 @@
-# OpenBridge MCP (v1.1.0-beta)
+# OpenBridge MCP (v1.2.1)
 
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
 > Este ecosistema se encuentra actualmente en **fase experimental de pruebas**. Este software se distribuye con fines de investigación, desarrollo y automatización de flujos agénticos avanzados. No representa un producto final cerrado.

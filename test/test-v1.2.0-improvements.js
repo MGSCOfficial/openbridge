@@ -2,38 +2,41 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import http from 'node:http';
-import { CONFIG } from '../src/config.js';
-import {
-  FREE_FALLBACK_CHAIN,
+
+// Aislamiento obligatorio ANTES de cargar la config: sin esto la suite escribe
+// en ~/.openbridge real y reescribe el historial de producción.
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openbridge-v120-'));
+process.env.OPENBRIDGE_DATA_DIR = dataDir;
+
+const { CONFIG } = await import('../src/config.js');
+const {
   getNextFallbackModel,
   recordModelFailure,
   recordModelSuccess,
   isModelInCooldown,
   getModelHealthMap
-} from '../src/client.js';
-import { jobManager } from '../src/job-manager.js';
-import { startDashboardServer, stopDashboardServer } from '../src/dashboard.js';
+} = await import('../src/client.js');
+const { jobManager } = await import('../src/job-manager.js');
+const { startDashboardServer, stopDashboardServer } = await import('../src/dashboard.js');
 
-console.log('=== TEST SUITE: MEJORAS ARQUITECTÓNICAS OPENBRIDGE v1.2.0 ===\n');
+console.log('=== TEST SUITE: MEJORAS ARQUITECTÓNICAS OPENBRIDGE v1.2.1 ===\n');
+console.log(`dataDir aislado: ${dataDir}\n`);
+
+const TEST_PORT = 4123;
 
 async function testCircuitBreaker() {
   console.log('[TEST 1] Circuit Breaker & Cooldown Proactivo...');
   const testModel = 'opencode/nemotron-3.5-lightning-free';
 
-  // 1. Estado inicial sano
   recordModelSuccess(testModel);
   assert.strictEqual(isModelInCooldown(testModel), false, 'El modelo debe iniciar sin cooldown');
 
-  // 2. Simular primer fallo
   recordModelFailure(testModel, true);
   assert.strictEqual(isModelInCooldown(testModel), false, '1 fallo no debe activar cooldown');
 
-  // 3. Simular segundo fallo (umbral alcanzado)
   recordModelFailure(testModel, true);
   assert.strictEqual(isModelInCooldown(testModel), true, '2 fallos deben activar cooldown');
 
-  // 4. Salto proactivo de modelo en cooldown
   const nextHealthy = getNextFallbackModel(testModel);
   assert.notStrictEqual(nextHealthy, testModel, 'getNextFallbackModel no debe retornar el modelo en cooldown');
   assert.strictEqual(
@@ -42,24 +45,34 @@ async function testCircuitBreaker() {
     'Debe saltar directamente al siguiente modelo sano'
   );
 
-  // 5. Ver mapa de salud
   const health = getModelHealthMap();
   assert.ok(health[testModel].inCooldown, 'El mapa de salud debe reflejar inCooldown: true');
   assert.ok(health[testModel].cooldownRemainingMs > 0, 'Debe tener tiempo de cooldown restante');
 
-  // 6. Reset tras éxito
+  // Regresión: `waitForCompletion` devuelve el id sin proveedor. El éxito debe
+  // limpiar el cooldown de la entrada real de la cadena, no de una clave fantasma.
+  recordModelSuccess('nemotron-3.5-lightning-free');
+  assert.strictEqual(
+    isModelInCooldown(testModel),
+    false,
+    'Un éxito reportado sin prefijo de proveedor debe limpiar el cooldown del modelo de la cadena'
+  );
+
+  recordModelFailure(testModel, true);
+  recordModelFailure(testModel, true);
   recordModelSuccess(testModel);
   assert.strictEqual(isModelInCooldown(testModel), false, 'Éxito debe resetear el cooldown');
-  console.log('  ✅ Circuit Breaker PASS: Detección de fallos, activación de cooldown y desvío proactivo certificados.');
+
+  console.log('  ✅ Circuit Breaker PASS: umbral, cooldown, desvío proactivo y reset por éxito certificados.');
 }
 
 async function testPayloadSegregation() {
-  console.log('\n[TEST 2] Segregación de Payloads y TTL...');
+  console.log('\n[TEST 2] Segregación de Payloads, TTL y escritura única...');
   const testJobId = `job_test_segregation_${Date.now()}`;
-  const largeResult = 'X'.repeat(5000); // 5KB de resultado
+  const largeResult = 'X'.repeat(5000);
   const largePrompt = 'Instrucción extensa '.repeat(50);
 
-  const testJob = {
+  jobManager.jobs.set(testJobId, {
     jobId: testJobId,
     sessionID: 'ses_mock_seg',
     model: 'opencode/nemotron-3.5-lightning-free',
@@ -73,81 +86,131 @@ async function testPayloadSegregation() {
     durationSeconds: 2,
     outcome: 'succeeded',
     tokens: { input: 10, output: 20, reasoning: 5 }
-  };
-
-  jobManager.jobs.set(testJobId, testJob);
+  });
   jobManager._saveJobs();
 
-  // 1. Validar que el archivo individual de payload existe en CONFIG.payloadsDir
   const payloadFile = path.join(CONFIG.payloadsDir, `${testJobId}.json`);
   assert.ok(fs.existsSync(payloadFile), `El archivo de payload ${payloadFile} debe existir`);
   const payloadData = JSON.parse(fs.readFileSync(payloadFile, 'utf8'));
   assert.strictEqual(payloadData.result, largeResult, 'El payload en disco debe preservar el resultado íntegro');
 
-  // 2. Validar que jobs.jsonl NO contiene el string gigante de 5KB (solo preview)
   const jobsFileContent = fs.readFileSync(CONFIG.jobsFile, 'utf8');
   assert.ok(!jobsFileContent.includes(largeResult), 'jobs.jsonl debe estar segregado y no contener payloads gigantes');
 
-  // 3. Validar reconstrucción íntegra en getJob
   const loadedJob = jobManager.getJob(testJobId);
   assert.strictEqual(loadedJob.response, largeResult, 'getJob debe cargar el resultado íntegro desde el payload');
   assert.strictEqual(loadedJob.diffsCount, 1, 'getJob debe reportar diffsCount correctamente');
 
-  // Limpieza de prueba
+  // Regresión: el guardado repetido no debe reescribir el payload de cada job.
+  const savedAtBefore = payloadData.savedAt;
+  await new Promise((r) => setTimeout(r, 15));
+  jobManager._saveJobs();
+  const savedAtAfter = JSON.parse(fs.readFileSync(payloadFile, 'utf8')).savedAt;
+  assert.strictEqual(savedAtAfter, savedAtBefore, 'Un guardado sin cambios no debe reescribir el payload');
+
+  // Persistencia real: simular proceso nuevo.
+  jobManager.jobs.clear();
+  jobManager._loadJobs();
+  const afterRestart = jobManager.getJob(testJobId);
+  assert.strictEqual(afterRestart.response, largeResult, 'El resultado debe sobrevivir a un reinicio');
+  assert.strictEqual(
+    jobManager.jobs.get(testJobId).promptText,
+    largePrompt,
+    'El prompt íntegro debe seguir disponible tras el reinicio'
+  );
+
   try {
     fs.unlinkSync(payloadFile);
   } catch {}
   jobManager.jobs.delete(testJobId);
   jobManager._saveJobs();
 
-  console.log('  ✅ Segregación PASS: Payload persistido en disco fuera de jobs.jsonl y recuperado con éxito.');
+  console.log('  ✅ Segregación PASS: payload fuera del índice, reconstrucción íntegra y escritura única.');
 }
 
 async function testDashboardAuth() {
   console.log('\n[TEST 3] Autenticación y Seguridad del Dashboard Local...');
-  const testPort = 4099;
-  startDashboardServer(testPort);
+  CONFIG.dashboardAuthEnabled = true;
+
+  startDashboardServer(TEST_PORT);
+  await new Promise((r) => setTimeout(r, 250));
 
   try {
-    // 1. Petición no autenticada a /api/status -> debe ser 401
-    const resNoAuth = await fetch(`http://127.0.0.1:${testPort}/api/status`);
+    const base = `http://127.0.0.1:${TEST_PORT}`;
+
+    const resNoAuth = await fetch(`${base}/api/status`);
     assert.strictEqual(resNoAuth.status, 401, 'Petición sin token debe retornar 401 Unauthorized');
-    const jsonNoAuth = await resNoAuth.json();
-    assert.strictEqual(jsonNoAuth.error, 'Unauthorized');
+    assert.strictEqual((await resNoAuth.json()).error, 'Unauthorized');
 
-    // 2. Petición con query param ?token=<serverPassword> -> debe ser 200 OK
-    const resQueryAuth = await fetch(`http://127.0.0.1:${testPort}/api/status?token=${CONFIG.serverPassword}`);
+    const resQueryAuth = await fetch(`${base}/api/status?token=${encodeURIComponent(CONFIG.serverPassword)}`);
     assert.strictEqual(resQueryAuth.status, 200, 'Petición con ?token= debe retornar 200 OK');
-    const jsonQuery = await resQueryAuth.json();
-    assert.strictEqual(jsonQuery.status, 'ONLINE');
 
-    // 3. Petición con Header Authorization: Bearer <serverPassword> -> debe ser 200 OK
-    const resHeaderAuth = await fetch(`http://127.0.0.1:${testPort}/api/status`, {
+    const resHeaderAuth = await fetch(`${base}/api/status`, {
       headers: { Authorization: `Bearer ${CONFIG.serverPassword}` }
     });
     assert.strictEqual(resHeaderAuth.status, 200, 'Petición con Authorization Bearer debe retornar 200 OK');
 
-    // 4. Petición web a / sin auth -> debe devolver 401 con formulario gateway
-    const resHtmlNoAuth = await fetch(`http://127.0.0.1:${testPort}/`);
-    assert.strictEqual(resHtmlNoAuth.status, 401, 'HTML sin auth debe retornar 401 Gateway');
-    const htmlText = await resHtmlNoAuth.text();
-    assert.ok(htmlText.includes('OpenBridge Console'), 'Debe mostrar la página de acceso protegido');
+    const resWrong = await fetch(`${base}/api/status`, { headers: { Authorization: 'Bearer token_falso' } });
+    assert.strictEqual(resWrong.status, 401, 'Un Bearer inválido debe rechazarse');
 
-    console.log('  ✅ Dashboard Auth PASS: Protección de API y Gateway HTML verificados.');
+    const resHtmlNoAuth = await fetch(`${base}/`);
+    assert.strictEqual(resHtmlNoAuth.status, 401, 'HTML sin auth debe retornar 401 Gateway');
+    assert.ok((await resHtmlNoAuth.text()).includes('OpenBridge Console'), 'Debe mostrar el gateway');
+
+    // El token de la query se canjea por cookie y la URL queda limpia.
+    const gateway = await fetch(`${base}/?token=${encodeURIComponent(CONFIG.serverPassword)}`, { redirect: 'manual' });
+    assert.strictEqual(gateway.status, 302, 'El canje de token debe redirigir a una URL sin token');
+    assert.strictEqual(gateway.headers.get('location'), '/');
+    const setCookie = gateway.headers.get('set-cookie') || '';
+    assert.ok(/HttpOnly/i.test(setCookie), 'La cookie debe ser HttpOnly');
+    assert.ok(/SameSite=Strict/i.test(setCookie), 'La cookie debe ser SameSite=Strict');
+    const cookie = setCookie.split(';')[0];
+
+    const withCookie = await fetch(`${base}/api/status`, { headers: { Cookie: cookie } });
+    assert.strictEqual(withCookie.status, 200, 'La cookie emitida debe autenticar');
+
+    const sse = await fetch(`${base}/api/events`, { headers: { Cookie: cookie } });
+    assert.strictEqual(sse.status, 200, 'El stream SSE debe aceptar la cookie');
+
+    // Regresión: un token no hexadecimal (passphrase manual) también debe funcionar.
+    const previous = CONFIG.serverPassword;
+    CONFIG.serverPassword = 'passphrase local no-hex';
+    try {
+      const gatewayNonHex = await fetch(
+        `${base}/?token=${encodeURIComponent(CONFIG.serverPassword)}`,
+        { redirect: 'manual' }
+      );
+      assert.strictEqual(gatewayNonHex.status, 302, 'Token no-hex debe canjearse igual');
+      const cookieNonHex = (gatewayNonHex.headers.get('set-cookie') || '').split(';')[0];
+      const withNonHex = await fetch(`${base}/api/status`, { headers: { Cookie: cookieNonHex } });
+      assert.strictEqual(withNonHex.status, 200, 'La cookie con token no-hex debe autenticar');
+    } finally {
+      CONFIG.serverPassword = previous;
+    }
+
+    console.log('  ✅ Dashboard Auth PASS: 401, Bearer, cookie, SSE y canje sin token en URL.');
   } finally {
     stopDashboardServer();
   }
 }
 
 async function testPluginManifest() {
-  console.log('\n[TEST 4] Validación de Manifiesto de Plugin Antigravity...');
-  const pluginFile = path.join(process.cwd(), 'plugin.json');
+  console.log('\n[TEST 4] Coherencia de versión y manifiesto de plugin...');
+  const root = process.cwd();
+  const pluginFile = path.join(root, 'plugin.json');
   assert.ok(fs.existsSync(pluginFile), 'plugin.json debe existir en la raíz');
+
   const manifest = JSON.parse(fs.readFileSync(pluginFile, 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const indexSource = fs.readFileSync(path.join(root, 'src', 'index.js'), 'utf8');
+  const indexVersion = (indexSource.match(/version:\s*'([^']+)'/) || [])[1];
+
   assert.strictEqual(manifest.name, 'openbridge');
-  assert.strictEqual(manifest.version, '1.2.0');
   assert.ok(manifest.mcpConfig, 'Debe especificar mcpConfig');
-  console.log('  ✅ Plugin Manifest PASS: plugin.json conforme a la especificación de Antigravity.');
+  assert.strictEqual(manifest.version, pkg.version, 'plugin.json y package.json deben coincidir');
+  assert.strictEqual(indexVersion, pkg.version, 'El McpServer debe reportar la misma versión');
+
+  console.log('  ✅ Plugin Manifest PASS: manifest, package.json e index.js en la misma versión.');
 }
 
 async function run() {
@@ -156,12 +219,16 @@ async function run() {
     await testPayloadSegregation();
     await testDashboardAuth();
     await testPluginManifest();
-    console.log('\n🎯 [100% PASS] Todas las mejoras arquitectónicas de v1.2.0 certificadas con éxito.');
-    process.exit(0);
+    console.log('\n🎯 [100% PASS] Mejoras de v1.2.x certificadas sobre datos aislados.');
+    process.exitCode = 0;
   } catch (err) {
-    console.error('\n❌ ERROR EN TEST v1.2.0:', err);
-    process.exit(1);
+    console.error('\n❌ ERROR EN TEST v1.2.x:', err);
+    process.exitCode = 1;
+  } finally {
+    try {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    } catch {}
   }
 }
 
-run();
+await run();

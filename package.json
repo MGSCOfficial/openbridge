@@ -1,6 +1,6 @@
 {
   "name": "openbridge-mcp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models with Real-Time SSE and Multi-Agent Swarms",
   "main": "src/index.js",
   "type": "module",

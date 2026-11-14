@@ -1504,10 +1504,16 @@ function checkDashboardAuth(req, url) {
   }
 
   // 3. Cookie openbridge_token=<token>
+  //    El token es opaco: puede no ser hexadecimal si el operador define
+  //    OPENCODE_SERVER_PASSWORD a mano, así que no se puede restringir el charset.
   const cookieHeader = req.headers.cookie || '';
-  const match = cookieHeader.match(/openbridge_token=([a-f0-9]+)/i);
-  if (match && match[1] === CONFIG.serverPassword) {
-    return true;
+  const match = cookieHeader.match(/(?:^|;\s*)openbridge_token=([^;]*)/);
+  if (match) {
+    let cookieToken = match[1];
+    try {
+      cookieToken = decodeURIComponent(cookieToken);
+    } catch {}
+    if (cookieToken === CONFIG.serverPassword) return true;
   }
 
   return false;
@@ -1539,14 +1545,23 @@ export function startDashboardServer(port = 4098) {
         return;
       }
 
-      const headers = {
+      // El token en la query queda en el historial y en cualquier Referer.
+      // Se canjea por cookie y se redirige a una URL limpia.
+      if (queryToken && queryToken.trim() === CONFIG.serverPassword) {
+        res.writeHead(302, {
+          Location: '/',
+          'Set-Cookie': `openbridge_token=${encodeURIComponent(
+            CONFIG.serverPassword
+          )}; Path=/; HttpOnly; SameSite=Strict`
+        });
+        res.end();
+        return;
+      }
+
+      res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-cache'
-      };
-      if (queryToken && queryToken.trim() === CONFIG.serverPassword) {
-        headers['Set-Cookie'] = `openbridge_token=${CONFIG.serverPassword}; Path=/; HttpOnly; SameSite=Strict`;
-      }
-      res.writeHead(200, headers);
+      });
       res.end(renderDashboardHtml());
       return;
     }

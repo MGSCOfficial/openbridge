@@ -1,5 +1,14 @@
 import assert from 'node:assert';
-import { jobManager } from '../src/job-manager.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+// Aislamiento: sin esto, importar job-manager carga ~/.openbridge y reescribe
+// el historial de producción al recuperar jobs pendientes.
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openbridge-handoff-'));
+process.env.OPENBRIDGE_DATA_DIR = dataDir;
+
+const { jobManager } = await import('../src/job-manager.js');
 
 console.log('--- TEST SUITE: OpenBridge Auto-Handoff Preventivo ---');
 
@@ -66,7 +75,13 @@ async function runTests() {
   console.log('\n[PASS] Todas las pruebas de Auto-Handoff superadas con éxito.');
 }
 
-runTests().catch(err => {
-  console.error('[FAIL] Error en la prueba:', err);
-  process.exit(1);
-});
+runTests()
+  .catch(err => {
+    console.error('[FAIL] Error en la prueba:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    try {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    } catch {}
+  });
