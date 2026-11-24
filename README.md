@@ -1,104 +1,68 @@
-# OpenBridge MCP (v1.2.1)
+# OpenBridge MCP (v2.0.0)
 
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
-> Este ecosistema se encuentra actualmente en **fase experimental de pruebas**. Este software se distribuye con fines de investigación, desarrollo y automatización de flujos agénticos avanzados. No representa un producto final cerrado.
+> OpenBridge se encuentra en evolución continua. Es un puente agnóstico para conectar clientes MCP con OpenCode.
 
-Puente agéntico de alto rendimiento bajo el protocolo **Model Context Protocol (MCP)** que conecta entornos de trabajo agénticos (como **Google Antigravity**) con clústeres locales y satélites de **OpenCode Zen**.
-
-Permite orquestar, disparar enjambres multi-modelo concurrentes y delegar tareas de código mecánicas a modelos como **NVIDIA Nemotron 3.5 Super VL**, **Nemotron 3.5 Lightning** y **DeepSeek V4.1 Flash**, rindiendo así la cuota de razonamiento de modelos principales como Gemini o involucrando a este.
-
-En otras Palabras es un MCP que permite que Google Antigravity Controle y coordine los modelos de inteligencia artificial que tengas disponibles en OpenCode
-
-Las Pruebas hechas hasta el momento han sido con los modelos gratuitos DeepSeek V4.1 Flash y NVIDIA Nemotron usando como proveedor a OpenCode y OpenRouter mediante Clave API
+**OpenBridge** es un puente ligero y descentralizado bajo el protocolo **Model Context Protocol (MCP)** que conecta clientes agénticos (como **Google Antigravity / Gemini**) con **cualquier modelo o proveedor configurado en OpenCode** (`opencode`, `openrouter`, `anthropic`, `openai`, `google`, `ollama`, etc.), sin atarse a modelos específicos ni imponer flujos propietarios.
 
 ---
 
-## 🎯 Arquitectura del Ecosistema
+## 🎯 Arquitectura de Puente Puro
 
 ```
  ┌──────────────────────────────────────────────────────────────┐
- │                      GOOGLE ANTIGRAVITY                      │
- │        (Agente Director / Orquestador de Alto Nivel)        │
+ │                CLIENTE MCP (Google Antigravity)              │
  └──────────────────────────────┬───────────────────────────────┘
                                 │ JSON-RPC (MCP sobre stdio)
  ┌──────────────────────────────▼───────────────────────────────┐
- │                      OPENBRIDGE MCP                          │
- │  ┌────────────────────────────────────────────────────────┐  │
- │  │ 8 Herramientas MCP:                                    │  │
- │  │ • openbridge_start_task      • openbridge_check_task   │  │
- │  │ • openbridge_delegate_task   • openbridge_cancel_task  │  │
- │  │ • openbridge_list_models     • openbridge_get_diff     │  │
- │  │ • openbridge_list_active     • openbridge_status       │  │
- │  └───────────────────────────┬────────────────────────────┘  │
- │                              │ REST + Server-Sent Events     │
- └──────────────────────────────┼───────────────────────────────┘
-                                │ http://127.0.0.1:4096
+ │                     OPENBRIDGE MCP (v2.0)                    │
+ │  • Ejecución síncrona (auto-handoff 120s) y asíncrona        │
+ │  • Continuidad multi-turno via session_id                    │
+ │  • Lectura de sesiones, mensajes y diffs                     │
+ │  • Persistencia JSONL + payloads segregados                  │
+ └──────────────────────────────┬───────────────────────────────┘
+                                │ REST + SSE (127.0.0.1:4096)
  ┌──────────────────────────────▼───────────────────────────────┐
- │                   OPENCODE ZEN LOCAL DAEMON                  │
- │       (Motor de Ejecución Satélite / Clúster Gratuito)       │
- └──────────────┬───────────────────────────────┬───────────────┘
-                │                               │
- ┌──────────────▼──────────────┐ ┌──────────────▼──────────────┐
- │   NVIDIA Nemotron 3.5       │ │   DeepSeek V4.1 Flash       │
- │   • Super VL Free (Visión)  │ │   • Algoritmos / Math       │
- │   • Lightning Free (Rápido) │ │   • Tests Unitarios         │
- └─────────────────────────────┘ └─────────────────────────────┘
+ │                    OPENCODE LOCAL DAEMON                     │
+ │   Cualquier proveedor y modelo configurado en tu instancia   │
+ └──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🛠️ Herramientas MCP Expuestas
+## 🛠️ Herramientas MCP Expuestas (10)
 
-| Herramienta | Modo | Descripción |
+| Herramienta | Categoría | Descripción |
 | :--- | :---: | :--- |
-| `openbridge_start_task` | **Asíncrono** | Dispara un worker en background de inmediato (<50ms) retornando un `task_id` sin bloquear la conversación del agente principal. Permite enjambres en paralelo. |
-| `openbridge_check_task` | **Consulta** | Comprueba el estado de un job asíncrono previo (`RUNNING`, `COMPLETED`, `FAILED`) y recolecta tokens, duración y respuesta. |
-| `openbridge_cancel_task` | **Control** | Interrumpe y aborta de forma limpia una tarea asíncrona en ejecución. |
-| `openbridge_list_active_tasks`| **Monitoreo** | Lista todas las tareas activas o recientes en la cola de enjambres de OpenBridge. |
-| `openbridge_delegate_task` | **Síncrono** | Delega una tarea de programación esperando la respuesta vía SSE de latencia cero, con soporte de sandboxing efímero ligero. |
-| `openbridge_list_models` | **Catálogo** | Lista los modelos disponibles a través de OpenCode Zen y OpenRouter con filtros de gratuidad (`free_only: true`). |
-| `openbridge_get_diff` | **Auditoría** | Extrae parches unificados de Git de los archivos creados o modificados durante una sesión satélite. |
-| `openbridge_status` | **Diagnóstico** | Health-check del daemon local de OpenCode, transporte SSE y conectividad de red. |
+| `openbridge_list_models` | **Catálogo** | Descubre modelos disponibles en cualquier proveedor configurado en OpenCode (`provider`, `free_only`, `search`). |
+| `openbridge_delegate_task` | **Síncrono** | Envía un prompt a cualquier modelo (o continúa una sesión con `session_id`) con auto-handoff preventivo a los 120s. |
+| `openbridge_start_task` | **Asíncrono** | Lanza una tarea en background retornando un `jobId` inmediato para paralelizar peticiones. |
+| `openbridge_check_task` | **Consulta** | Consulta estado, resultado, tokens, coste reportado y diffs de un `jobId`. |
+| `openbridge_cancel_task` | **Control** | Interrumpe de forma limpia una tarea en ejecución. |
+| `openbridge_list_active_tasks` | **Control** | Lista jobs recientes registrados en OpenBridge. |
+| `openbridge_list_sessions` | **Sesiones** | Lista sesiones recientes directamente desde OpenCode. |
+| `openbridge_get_messages` | **Sesiones** | Lee el historial de mensajes y bloques de texto/razonamiento de cualquier `session_id`. |
+| `openbridge_get_diff` | **Auditoría** | Extrae diffs de archivos modificados durante una sesión de OpenCode. |
+| `openbridge_status` | **Diagnóstico** | Verifica salud del daemon OpenCode, transporte SSE, configuración y modelos observados. |
 
 ---
 
-## 🧠 Skills Agénticas Incluidas (`/skills`)
+## 🧠 Skill Incluida (`/skills`)
 
-El repositorio incluye 3 habilidades agénticas listas para instalar en `.agents/skills/`:
+- **`openbridge-delegator`**: Guía agnóstica de uso del puente MCP (`skills/openbridge-delegator/SKILL.md`).
 
-1. **`openbridge-delegator`**: Define cuándo y cómo Antigravity debe transferir tareas repetitivas a modelos satélites, evaluando complejidad, impacto en cuota y tipo de código.
-2. **`model-task-matcher`**: Matriz de enrutamiento técnico que selecciona el modelo óptimo según el problema (ej. *Nemotron* para UI/Full-stack, *DeepSeek* para cálculo/tests unitarios).
-3. **`worker-core`**: Protocolo interno para workers satélites que previene atajos (*reward hacking*), impone validación sintáctica estricta y formatea reportes de entrega.
-
-> *Nota sobre la interfaz gráfica de telemetría*: La herramienta visual/dashboard en tiempo real se mantiene **fuera del core del repositorio** al encontrarse actualmente en rediseño e investigación interna.
-
----
-
-## 🔗 Ecosistema y Habilidades Complementarias Recomendadas
-
-Para maximizar la potencia, orden y estabilidad de **OpenBridge**, se recomienda integrarlo junto a las siguientes habilidades del ecosistema:
-
-1. **[Antigravity Zen](https://github.com/MGSCOfficial/antigravity-zen)** 🧘:
-   * **Higiene Cognitiva y Pizarra Dinámica**: Mientras OpenBridge delega el trabajo pesado a los modelos satélites, Antigravity Zen mantiene limpia la ventana de contexto del agente principal, previniendo la degradación de contexto (*Context Rot*) y los bucles de error mediante su motor de pizarra en disco (`.zen/blackboard.md`).
-
-2. **[Deep Problem Orchestrator](https://github.com/MGSCOfficial/deep-problem-orchestrator)** 🏛️:
-   * **Descomposición Quirúrgica y Motor ATLAS**: Proporciona el marco de gobernanza Tri-Track para descomponer sistemas complejos en micro-problemas anatómicos (`00_Inventory.md`), trazando dependencias y validando contratos antes de disparar tareas mecánicas en OpenBridge.
+> Las herramientas complementarias específicas de modelos concretos o paneles visuales viven fuera de este repositorio para mantener OpenBridge enfocado únicamente en su rol de puente.
 
 ---
 
 ## 📋 Requisitos Previos
 
-1. **Node.js**: Versión `>= 18.0.0` (Probado en Node.js v24 LTS en Windows).
-2. **OpenCode CLI**: Motor satélite local instalado globalmente:
+1. **Node.js**: Versión `>= 18.0.0`.
+2. **OpenCode CLI** instalado y con los proveedores/claves que desees usar configurados en OpenCode:
    ```bash
    npm install -g @opencode/cli
    ```
-3. **Daemon de OpenCode Activo**: El daemon debe estar corriendo o configurado para auto-arranque en el puerto `4096`:
-   ```bash
-   opencode serve --port 4096 --password "$(cat ~/.openbridge/token)"
-   ```
-   El token lo genera OpenBridge en `~/.openbridge/token` (ver [Variables de entorno](#3-variables-de-entorno)).
-4. **Google Antigravity** (o cualquier cliente compatible con MCP).
+3. **Cliente MCP** (Google Antigravity u otro cliente compatible con MCP stdio).
 
 ---
 
@@ -111,9 +75,7 @@ cd openbridge
 npm install
 ```
 
-### 2. Configurar en Google Antigravity
-Agrega la siguiente entrada en la configuración de servidores MCP de Antigravity (generalmente en `mcp_settings.json` o la configuración del plugin):
-
+### 2. Configurar en Google Antigravity (`mcp_config.json`)
 ```json
 {
   "mcpServers": {
@@ -121,97 +83,43 @@ Agrega la siguiente entrada en la configuración de servidores MCP de Antigravit
       "command": "node",
       "args": [
         "<RUTA_ABSOLUTA>/openbridge/src/index.js"
-      ],
-      "env": {
-        "OPENCODE_PORT": "4096",
-        "OPENCODE_HOST": "127.0.0.1",
-        "OPENCODE_DEFAULT_MODEL": "opencode/nemotron-3.5-super-vl-free"
-      }
+      ]
     }
   }
 }
 ```
 
-> **No hardcodees la contraseña del daemon.** OpenBridge genera un token
-> criptográfico en `~/.openbridge/token` en el primer arranque. Si necesitas
-> fijar uno explícito, exporta `OPENCODE_SERVER_PASSWORD` en el entorno (tiene
-> prioridad sobre el archivo). El antiguo literal `openbridge_local_token_2026`
-> ya **no** se usa: solo se acepta si activas `OPENBRIDGE_ALLOW_LEGACY=1` como
-> puente de migración, y el proceso lo reporta con un warning.
-
-### 3. Variables de entorno
+### 3. Variables de entorno opcionales
 
 | Variable | Default | Efecto |
 | :--- | :--- | :--- |
-| `OPENCODE_SERVER_PASSWORD` | token de `~/.openbridge/token` | Credencial del daemon (prioridad máxima) |
-| `OPENBRIDGE_DATA_DIR` | `~/.openbridge` | Directorio de `token` y `jobs.jsonl` |
-| `OPENBRIDGE_ALLOW_LEGACY` | `0` | Acepta el token legacy hardcodeado. **Solo migración**: elimínalo tras rotar el daemon |
-| `OPENBRIDGE_ALLOW_NESTED` | `0` | Permite que un worker delegue a su vez. Desactivado por seguridad |
-| `OPENBRIDGE_MAX_DEPTH` | `2` | Techo de profundidad cuando el nesting está habilitado |
-| `OPENBRIDGE_JOBS_RETENTION` | `200` | Máximo de jobs persistidos en `jobs.jsonl` |
-| `OPENBRIDGE_PAYLOAD_TTL_DAYS` | `7` | Días de retención para payloads pesados en `payloads/<id>.json` |
-| `OPENBRIDGE_CIRCUIT_BREAKER_MS` | `60000` | Tiempo de enfriamiento proactivo para modelos con 2 fallos consecutivos |
-| `OPENBRIDGE_DASHBOARD_NO_AUTH` | `0` | Desactiva autenticación en el Dashboard `:4098` si se fija en `1` |
-
-### 4. Rotar el token del daemon
-
-El daemon **es hijo del proceso MCP**: `ensureServerRunning()` lo lanza con
-`OPENCODE_SERVER_PASSWORD=CONFIG.serverPassword` y lo mata en `SIGINT`/`SIGTERM`
-(`stopSpawnedServer()`). Por eso la rotación no se hace a mano con
-`opencode serve`: se hace **reiniciando el MCP**.
-
-```bash
-# 1. Confirmar qué token tiene el daemon actualmente (el legacy devuelve 200 si no rotó)
-curl -s -o /dev/null -w "%{http_code}\n" -u "opencode:$(cat ~/.openbridge/token)" http://127.0.0.1:4096/api/info
-
-# 2. Detener el MCP de OpenBridge de forma ordenada (NO matar el proceso a la fuerza).
-#    Eso termina el daemon hijo y, con él, cualquier sesión de worker en vuelo.
-
-# 3. Arrancar el MCP: vuelve a lanzar el daemon con el token de ~/.openbridge/token.
-
-# 4. Verificar que rotó de verdad (ver checklist abajo).
-```
-
-Checklist de verificación tras el reinicio:
-
-| Comprobación | Esperado |
-| :--- | :--- |
-| PID dueño del puerto `4096` | **distinto** del anterior |
-| `Authorization` con `~/.openbridge/token` en `/api/info` | `200` |
-| `Authorization` con `openbridge_local_token_2026` en `/api/info` | `401` |
-| Log del MCP | sin `[OpenBridge Auth] ... token legacy` |
-
-Si el token legacy sigue devolviendo `200`, el daemon viejo sobrevivió como
-huérfano (típico de un kill forzado en Windows, que no propaga al hijo). En ese
-caso: matar el `opencode.exe serve` huérfano, liberar el puerto y reiniciar el
-MCP. Con `OPENBRIDGE_ALLOW_LEGACY=1` activo el MCP adoptaría el token viejo **en
-silencio salvo el warning**, así que la verificación del `401` es obligatoria.
-
-Solo cuando el paso 4 esté en verde: eliminar `OPENBRIDGE_ALLOW_LEGACY` del
-`env` del MCP. A partir de ahí el puente de migración deja de existir.
+| `OPENCODE_PORT` | `4096` | Puerto local del daemon OpenCode |
+| `OPENCODE_HOST` | `127.0.0.1` | Host del daemon OpenCode |
+| `OPENCODE_DEFAULT_MODEL` | *(ninguno)* | Modelo por defecto (`provider/model`) si se omite al delegar; sin valor, OpenCode usa su modelo activo |
+| `OPENBRIDGE_FALLBACK_MODELS` | *(vacío)* | Lista separada por comas de modelos de respaldo ante errores `429`/`5xx` |
+| `OPENBRIDGE_CIRCUIT_BREAKER_MS` | `60000` | Enfriamiento para modelos con 2 fallos recuperables consecutivos |
+| `OPENCODE_SERVER_PASSWORD` | token en `~/.openbridge/token` | Credencial explícita del daemon OpenCode |
+| `OPENBRIDGE_DATA_DIR` | `~/.openbridge` | Directorio para `token`, `jobs.jsonl` y `payloads/` |
+| `OPENBRIDGE_ALLOW_LEGACY` | `0` | Puente temporal de migración para token legacy (`1` para activar) |
+| `OPENBRIDGE_ALLOW_NESTED` | `0` | Permite delegación anidada desde workers (`1` para habilitar) |
+| `OPENBRIDGE_MAX_DEPTH` | `2` | Tope de profundidad cuando `OPENBRIDGE_ALLOW_NESTED=1` |
+| `OPENBRIDGE_JOBS_RETENTION` | `200` | Máximo de jobs retenidos en `jobs.jsonl` |
+| `OPENBRIDGE_PAYLOAD_TTL_DAYS` | `7` | Días de retención para archivos en `payloads/` |
 
 ---
 
 ## 🧪 Verificación y Suite de Pruebas
 
-OpenBridge cuenta con una suite de pruebas de caja negra y estrés:
-
 ```bash
-# 1. Comprobación de integridad sintáctica
-npm run check
+# Comprobación sintáctica + suite completa en sandbox aislado
+npm test
 
-# 2. Suite de remediación (persistencia, fallback, recursión, token) — 5 pruebas
-npm run test:remediation
-
-# 3. Validación de conectividad y streaming SSE de baja latencia
+# Pruebas individuales contra un daemon OpenCode activo
+npm run test:p01
+npm run test:p02
 npm run test:latency
-
-# 4. Prueba de enjambre paralelo concurrente (3 modelos simultáneos a $0)
 npm run test:swarm
 ```
-
-La suite de remediación usa un `OPENBRIDGE_DATA_DIR` temporal: no escribe en
-`~/.openbridge`, así que no contamina el historial de producción.
 
 ---
 

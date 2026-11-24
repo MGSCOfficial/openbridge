@@ -54,7 +54,6 @@ class JobManager extends EventEmitter {
 
   _prunePayloads() {
     if (!CONFIG.payloadsDir || !fs.existsSync(CONFIG.payloadsDir)) return;
-    // La purga recorre el directorio: no hace falta en cada guardado.
     if (Date.now() - this._lastPayloadPrune < 10 * 60 * 1000) return;
     this._lastPayloadPrune = Date.now();
     try {
@@ -80,10 +79,6 @@ class JobManager extends EventEmitter {
     }
   }
 
-  /**
-   * Retención acotada: sin esto, jobs.jsonl crece indefinidamente y _loadJobs
-   * parsea todo el histórico en cada arranque. Nunca elimina jobs RUNNING.
-   */
   _pruneJobs() {
     const max = CONFIG.jobsRetention;
     if (!max || this.jobs.size <= max) return;
@@ -104,9 +99,6 @@ class JobManager extends EventEmitter {
       const tmpFile = `${CONFIG.jobsFile}.tmp`;
       const lines = Array.from(this.jobs.values())
         .map((j) => {
-          // El payload se escribe una vez (al completar o al encontrar el job
-          // cargado sin payload). Reescribirlo en cada guardado multiplicaba el
-          // I/O por el número de jobs retenidos.
           if (CONFIG.payloadsDir && (j.result || j.diffs?.length > 0)) {
             const payloadPath = path.join(CONFIG.payloadsDir, `${j.jobId}.json`);
             if (!fs.existsSync(payloadPath)) {
@@ -178,7 +170,7 @@ class JobManager extends EventEmitter {
           continue;
         }
 
-        const result = await client.waitForCompletion(job.sessionID, 5000).catch(() => null);
+        const result = await client.waitForCompletion(job.sessionID, 5000, job.afterTimestamp || 0).catch(() => null);
         if (!result) {
           throw new Error('[RECOVERY_INCOMPLETE] La sesión está idle pero no se pudo recolectar el resultado');
         }
@@ -189,9 +181,10 @@ class JobManager extends EventEmitter {
         job.outcome = result.outcome;
         job.modelUsed = result.model?.id || job.model;
         job.tokens = result.tokens;
+        job.cost = result.cost ?? null;
         job.diffs = result.diffs || [];
         job.result = result.text;
-        recordModelSuccess(job.modelUsed || job.model);
+        recordModelSuccess(job.modelUsed || job.model, job.fallbackModels);
         this._savePayload(job.jobId, {
           promptText: job.promptText,
           result: job.result,
@@ -212,6 +205,8 @@ class JobManager extends EventEmitter {
     const {
       task,
       model = CONFIG.defaultModel,
+      session_id = null,
+      fallback_models = null,
       working_dir = null,
       read_only = false,
       timeout_seconds = 600,
@@ -231,8 +226,12 @@ class JobManager extends EventEmitter {
       );
     }
 
+    const fallbackChain =
+      Array.isArray(fallback_models) && fallback_models.length > 0 ? fallback_models : CONFIG.fallbackModels;
+
     const jobId = `job_${randomUUID().slice(0, 8)}`;
-    const effectiveDir = working_dir || (read_only ? createSandbox(jobId) : null);
+    const resumedSession = Boolean(session_id);
+    const effectiveDir = resumedSession ? null : (working_dir || (read_only ? createSandbox(jobId) : null));
 
     let promptText = task;
     if (read_only) {
@@ -242,47 +241,58 @@ class JobManager extends EventEmitter {
       promptText = `[OPENBRIDGE_RECURSION_DEPTH: ${declaredDepth}]\n${promptText}`;
     }
 
-    let activeModel = model;
-
-    // Circuit Breaker: si el modelo objetivo está en enfriamiento, conmutar proactivamente
-    if (isModelInCooldown(activeModel)) {
-      const nextHealthy = getNextFallbackModel(activeModel);
-      if (nextHealthy && nextHealthy !== activeModel) {
-        console.warn(
-          `[Circuit Breaker] Modelo ${activeModel} en cooldown. Conmutando proactivamente a ${nextHealthy}...`
-        );
-        activeModel = nextHealthy;
-      }
-    }
-
+    let activeModel = model || null;
     let sessionID = null;
+    let afterTimestamp = 0;
 
-    while (!sessionID) {
-      let candidateSessionID = null;
-      try {
-        candidateSessionID = await client.createSession({
-          title: `openbridge-${jobId}`,
-          model: activeModel,
-          directory: effectiveDir
-        });
-        await client.sendPrompt(candidateSessionID, promptText);
-        sessionID = candidateSessionID;
-      } catch (err) {
-        if (candidateSessionID) {
-          await client.interruptSession(candidateSessionID).catch(() => {});
-        }
-        recordModelFailure(activeModel, isRecoverableModelError(err));
-        const nextModel = getNextFallbackModel(activeModel);
-        if (nextModel && isRecoverableModelError(err)) {
+    if (resumedSession) {
+      // Continuación de sesión existente: no crear sesión ni conmutar de modelo en silencio.
+      const sentAt = Date.now();
+      const promptRes = await client.sendPrompt(session_id, promptText);
+      sessionID = session_id;
+      afterTimestamp = promptRes?.time?.created || sentAt;
+    } else {
+      if (activeModel && fallbackChain.length > 0 && isModelInCooldown(activeModel)) {
+        const nextHealthy = getNextFallbackModel(activeModel, fallbackChain);
+        if (nextHealthy && nextHealthy !== activeModel) {
           console.warn(
-            `[OpenBridge Fallback] Modelo ${activeModel} falló en create/send (${err.message}). Conmutando a ${nextModel}...`
+            `[Circuit Breaker] Modelo ${activeModel} en cooldown. Conmutando proactivamente a ${nextHealthy}...`
           );
-          activeModel = nextModel;
-        } else {
-          if (read_only && effectiveDir) {
-            cleanupSandbox(jobId);
+          activeModel = nextHealthy;
+        }
+      }
+
+      while (!sessionID) {
+        let candidateSessionID = null;
+        try {
+          const sentAt = Date.now();
+          candidateSessionID = await client.createSession({
+            title: `openbridge-${jobId}`,
+            model: activeModel,
+            directory: effectiveDir
+          });
+          const promptRes = await client.sendPrompt(candidateSessionID, promptText);
+          sessionID = candidateSessionID;
+          afterTimestamp = promptRes?.time?.created || sentAt;
+        } catch (err) {
+          if (candidateSessionID) {
+            await client.interruptSession(candidateSessionID).catch(() => {});
           }
-          throw err;
+          if (activeModel) {
+            recordModelFailure(activeModel, isRecoverableModelError(err), fallbackChain);
+          }
+          const nextModel = getNextFallbackModel(activeModel, fallbackChain);
+          if (nextModel && isRecoverableModelError(err)) {
+            console.warn(
+              `[OpenBridge Fallback] Modelo ${activeModel || 'default'} falló en create/send (${err.message}). Conmutando a ${nextModel}...`
+            );
+            activeModel = nextModel;
+          } else {
+            if (read_only && effectiveDir) {
+              cleanupSandbox(jobId);
+            }
+            throw err;
+          }
         }
       }
     }
@@ -290,18 +300,22 @@ class JobManager extends EventEmitter {
     const job = {
       jobId,
       sessionID,
+      resumedSession,
       model: activeModel,
-      initialModel: model,
+      initialModel: model || null,
+      fallbackModels: fallbackChain,
+      afterTimestamp,
       task: task.slice(0, 100) + (task.length > 100 ? '...' : ''),
       promptText,
       readOnly: read_only,
-      sandboxDir: read_only ? effectiveDir : null,
+      sandboxDir: !resumedSession && read_only ? effectiveDir : null,
       callDepth: declaredDepth,
       status: 'RUNNING',
       startedAt: Date.now(),
       completedAt: null,
       durationSeconds: 0,
       outcome: null,
+      cost: null,
       result: null,
       diffs: [],
       error: null
@@ -316,11 +330,14 @@ class JobManager extends EventEmitter {
     return {
       jobId,
       sessionID,
-      model: activeModel,
+      resumedSession,
+      model: activeModel || 'opencode-default',
       status: 'RUNNING',
       startedAt: new Date(job.startedAt).toISOString(),
       callDepth: declaredDepth,
-      message: 'Tarea iniciada en segundo plano con éxito'
+      message: resumedSession
+        ? `Prompt enviado a la sesión existente ${sessionID}`
+        : 'Tarea iniciada en segundo plano con éxito'
     };
   }
 
@@ -328,17 +345,20 @@ class JobManager extends EventEmitter {
     (async () => {
       try {
         const timeoutMs = (timeoutSeconds || 600) * 1000;
-        const result = await client.waitForCompletion(job.sessionID, timeoutMs);
+        const result = await client.waitForCompletion(job.sessionID, timeoutMs, job.afterTimestamp || 0);
 
         job.status = 'COMPLETED';
         job.completedAt = Date.now();
         job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
         job.outcome = result.outcome;
-        job.modelUsed = result.model?.id || job.model;
+        job.modelUsed = result.model
+          ? (result.model.providerID ? `${result.model.providerID}/${result.model.id}` : result.model.id)
+          : job.model;
         job.tokens = result.tokens;
+        job.cost = result.cost ?? null;
         job.diffs = result.diffs || [];
         job.result = result.text;
-        recordModelSuccess(job.modelUsed || job.model);
+        recordModelSuccess(job.modelUsed || job.model, job.fallbackModels);
         this._savePayload(job.jobId, {
           promptText: job.promptText,
           result: job.result,
@@ -347,21 +367,27 @@ class JobManager extends EventEmitter {
         });
         this.emit('task_completed', job);
       } catch (err) {
-        recordModelFailure(job.model, isRecoverableModelError(err));
-        const nextModel = getNextFallbackModel(job.model);
+        if (job.model) {
+          recordModelFailure(job.model, isRecoverableModelError(err), job.fallbackModels);
+        }
+        const nextModel = !job.resumedSession ? getNextFallbackModel(job.model, job.fallbackModels) : null;
         if (nextModel && isRecoverableModelError(err) && !job.fallbackAttempted) {
           job.fallbackAttempted = true;
           job.fallbackFrom = job.model;
           job.model = nextModel;
-          console.warn(`[OpenBridge Fallback Runtime] Conmutando ${job.fallbackFrom} -> ${nextModel} para job ${job.jobId}`);
+          console.warn(
+            `[OpenBridge Fallback Runtime] Conmutando ${job.fallbackFrom || 'default'} -> ${nextModel} para job ${job.jobId}`
+          );
           try {
+            const sentAt = Date.now();
             const newSessionID = await client.createSession({
               title: `openbridge-${job.jobId}-fallback`,
               model: nextModel,
               directory: job.sandboxDir || effectiveDir
             });
             job.sessionID = newSessionID;
-            await client.sendPrompt(newSessionID, promptText || job.promptText || job.task);
+            const promptRes = await client.sendPrompt(newSessionID, promptText || job.promptText || job.task);
+            job.afterTimestamp = promptRes?.time?.created || sentAt;
             return this._trackJobBackground(job, timeoutSeconds, effectiveDir, promptText);
           } catch (fallbackErr) {
             err = fallbackErr;
@@ -390,7 +416,7 @@ class JobManager extends EventEmitter {
 
     const payload = this._loadPayload(jobId);
     const effectiveResult = job.result || payload?.result || job.resultPreview || null;
-    const effectiveDiffs = (job.diffs && job.diffs.length > 0) ? job.diffs : (payload?.diffs || []);
+    const effectiveDiffs = job.diffs && job.diffs.length > 0 ? job.diffs : (payload?.diffs || []);
 
     const currentDuration = job.completedAt
       ? job.durationSeconds
@@ -400,16 +426,16 @@ class JobManager extends EventEmitter {
       found: true,
       jobId: job.jobId,
       sessionID: job.sessionID,
-      model: job.modelUsed || job.model,
-      initialModel: job.initialModel || job.model,
+      resumedSession: Boolean(job.resumedSession),
+      model: job.modelUsed || job.model || 'opencode-default',
+      initialModel: job.initialModel || null,
       fallbackFrom: job.fallbackFrom || null,
       callDepth: job.callDepth || 0,
       status: job.status,
       durationSeconds: currentDuration,
       outcome: job.outcome,
       tokens: job.tokens,
-      costUsd: 0,
-      geminiQuotaSaved: '100%',
+      cost: job.cost ?? null,
       diffsCount: effectiveDiffs.length,
       diffs: effectiveDiffs,
       response: effectiveResult,
@@ -424,7 +450,8 @@ class JobManager extends EventEmitter {
       .map((j) => ({
         jobId: j.jobId,
         sessionID: j.sessionID,
-        model: j.model,
+        resumedSession: Boolean(j.resumedSession),
+        model: j.modelUsed || j.model || 'opencode-default',
         callDepth: j.callDepth || 0,
         status: j.status,
         startedAt: new Date(j.startedAt).toISOString(),

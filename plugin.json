@@ -1,8 +1,8 @@
 {
   "name": "openbridge",
   "displayName": "OpenBridge MCP",
-  "version": "1.2.1",
-  "description": "High-performance MCP Bridge connecting Google Antigravity with OpenCode Zen free models (NVIDIA Nemotron, DeepSeek Flash, Gemma) with real-time SSE streaming, Circuit Breaker and 100% Gemini quota offloading.",
+  "version": "2.0.0",
+  "description": "Decentralized MCP Bridge connecting Google Antigravity / Gemini with any AI provider and model available in OpenCode, with SSE streaming, multi-turn session continuity and background tasks.",
   "author": {
     "name": "MGSCO",
     "url": "https://github.com/MGSCOfficial"
@@ -18,9 +18,8 @@
     "model-context-protocol",
     "antigravity",
     "opencode",
-    "nemotron",
-    "deepseek",
-    "circuit-breaker",
+    "ai-bridge",
+    "multi-provider",
     "ai-agents"
   ],
   "mcpConfig": "./openbridge-mcp-config.json"

@@ -7,42 +7,34 @@ async function run() {
 
   try {
     await eventStream.start();
-    console.log('[TEST-LATENCY] EventStream SSE conectado con éxito.');
+    const models = await client.listModels();
+    const targetModel =
+      process.env.OPENCODE_DEFAULT_MODEL ||
+      models.find((m) => m.isFree)?.fullId ||
+      models[0]?.fullId ||
+      null;
 
     const sandboxId = `test_latency_${Date.now()}`;
     const sandboxDir = createSandbox(sandboxId);
-    console.log('[TEST-LATENCY] Sandbox efímero creado en:', sandboxDir);
 
     const sessionID = await client.createSession({
       title: 'test-latency-sse',
-      model: 'opencode/nemotron-3.5-lightning-free',
+      model: targetModel,
       directory: sandboxDir
     });
-    console.log('[TEST-LATENCY] Sesión creada:', sessionID);
 
     const t0 = Date.now();
-    await client.sendPrompt(sessionID, '[SOLO LECTURA] Responde solo: V1.1_ACTIVO');
-
-    console.log('[TEST-LATENCY] Esperando respuesta reactiva vía SSE...');
-    const result = await client.waitForCompletion(sessionID, 60000);
+    const sent = await client.sendPrompt(sessionID, '[SOLO LECTURA] Responde solo: PUENTE_ACTIVO');
+    const result = await client.waitForCompletion(sessionID, 60000, sent?.time?.created || t0);
     const duration = Date.now() - t0;
-
-    console.log('[TEST-LATENCY] Resultado recibido:');
-    console.log('  • Duración total:', `${duration}ms`);
-    console.log('  • Tokens:', result.tokens);
-    console.log('  • Respuesta:', result.text.trim());
 
     cleanupSandbox(sandboxId);
 
-    if (result.outcome === 'succeeded' && result.tokens.input < 300) {
-      console.log(`✅ [LATENCY PASS] Éxito: Tokens de entrada reducidos a ${result.tokens.input} (vs 1200+ previo) y respuesta capturada en ${duration}ms.`);
+    if (result.outcome === 'succeeded') {
+      console.log(`✅ [LATENCY PASS] Respuesta capturada con ${targetModel || 'default'} en ${duration}ms.`);
       process.exit(0);
-    } else if (result.outcome === 'succeeded') {
-      console.log(`✅ [LATENCY PASS] Respuesta capturada con éxito en ${duration}ms (Tokens input: ${result.tokens.input}).`);
-      process.exit(0);
-    } else {
-      throw new Error(`Resultado inesperado: ${JSON.stringify(result)}`);
     }
+    throw new Error(`Resultado inesperado: ${JSON.stringify(result)}`);
   } catch (err) {
     console.error('❌ [LATENCY FAIL]:', err.message);
     process.exit(1);

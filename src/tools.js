@@ -8,15 +8,19 @@ import { eventStream } from './event-stream.js';
 export const TOOLS = [
   {
     name: 'openbridge_list_models',
-    description: 'Lista los modelos de IA disponibles a traves de OpenCode Zen y OpenRouter, indicando modelos 100% gratuitos (como NVIDIA Nemotron 3.5 Lightning Free, Super VL Free, Gemma o DeepSeek Flash).',
+    description: 'Lista todos los modelos e inteligencias artificiales disponibles en el daemon de OpenCode (cualquier proveedor configurado: opencode, openrouter, anthropic, openai, google, ollama, etc.).',
     parameters: {
-      provider: z.enum(['all', 'opencode', 'openrouter']).optional().default('all').describe('Filtrar por proveedor (all, opencode, openrouter)'),
-      free_only: z.boolean().optional().default(true).describe('Mostrar unicamente modelos gratuitos con coste $0'),
-      search: z.string().optional().default('').describe('Termino de busqueda opcional (ej. nemotron, gemma, flash)')
+      provider: z.string().optional().default('all').describe('Filtrar por proveedor configurado en OpenCode (ej. all, opencode, openrouter, anthropic, openai, ollama)'),
+      free_only: z.boolean().optional().default(false).describe('Si es true, filtra unicamente modelos con coste 0 o gratuitos'),
+      search: z.string().optional().default('').describe('Termino de busqueda opcional en el ID, nombre o proveedor del modelo')
     },
     execute: async (args) => {
       try {
-        const models = await client.listModels(args);
+        const models = await client.listModels({
+          provider: args.provider,
+          freeOnly: args.free_only,
+          search: args.search
+        });
         return {
           content: [
             {
@@ -44,14 +48,16 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_delegate_task',
-    description: 'Delega una tarea con Auto-Handoff preventivo (120s): si el modelo tarda mas de 2 minutos pensando, transfiere la tarea de forma transparente a segundo plano para prevenir el corte de socket de Antigravity (180s).',
+    description: 'Delega un prompt a cualquier modelo de OpenCode (creando sesion nueva o continuando una existente con session_id) con Auto-Handoff preventivo a los 120s.',
     parameters: {
-      task: z.string().describe('Instruccion detallada de la tarea que debe realizar el worker externo'),
-      model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free, opencode/deepseek-v4.1-flash-free)'),
-      working_dir: z.string().optional().describe('Directorio absoluto de trabajo sobre el que debe operar OpenCode. Si se omite y read_only es true, opera en sandbox efimero.'),
-      read_only: z.boolean().optional().default(false).describe('Si es true, le indica al modelo devolver analisis o codigo sugerido sin escribir archivos en disco.'),
+      task: z.string().describe('Instruccion o mensaje que debe procesarse en OpenCode'),
+      model: z.string().optional().describe('Modelo objetivo en formato provider/model (opcional; si se omite usa OPENCODE_DEFAULT_MODEL o el activo en OpenCode)'),
+      session_id: z.string().optional().describe('ID de una sesion existente de OpenCode para continuar una conversacion multi-turno'),
+      fallback_models: z.array(z.string()).optional().describe('Lista opcional de modelos de respaldo ante errores 429/5xx'),
+      working_dir: z.string().optional().describe('Directorio absoluto de trabajo para OpenCode. Si se omite y read_only es true, opera en sandbox efimero.'),
+      read_only: z.boolean().optional().default(false).describe('Si es true, indica al agente devolver su respuesta sin modificar archivos en disco.'),
       timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo total de espera en segundos'),
-      call_depth: z.number().optional().default(0).describe('Profundidad actual de recursión agéntica (controlada para prevenir fork bombs)')
+      call_depth: z.number().optional().default(0).describe('Profundidad actual de recursion agentica (controlada para prevenir bucles infinitos)')
     },
     execute: async (args) => {
       try {
@@ -69,11 +75,11 @@ export const TOOLS = [
                   {
                     sessionID: j.sessionID,
                     jobId: j.jobId,
+                    resumedSession: Boolean(j.resumedSession),
                     outcome: j.outcome,
-                    modelUsed: j.modelUsed || j.model,
+                    modelUsed: j.modelUsed || j.model || 'opencode-default',
                     tokens: j.tokens,
-                    costUsd: 0,
-                    geminiQuotaOffloaded: '100%',
+                    cost: j.cost ?? null,
                     durationSeconds: j.durationSeconds,
                     diffsCount: j.diffs?.length || 0,
                     diffs: j.diffs,
@@ -98,8 +104,7 @@ export const TOOLS = [
                   sessionID: jobInfo.sessionID,
                   model: jobInfo.model,
                   elapsedSeconds: Math.round(maxSyncMs / 1000),
-                  geminiQuotaOffloaded: '100%',
-                  message: 'El modelo continúa procesando un razonamiento profundo (Chain-of-Thought). Para prevenir el corte por timeout de 180s en Antigravity, la tarea fue transferida a segundo plano con seguridad total. Monitorea el progreso con openbridge_check_task o en el dashboard en vivo (http://localhost:4098).'
+                  message: 'La tarea excedio la ventana sincrona de 120s y paso a segundo plano de forma segura. Monitorea o recolecta el resultado con openbridge_check_task.'
                 },
                 null,
                 2
@@ -117,14 +122,16 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_start_task',
-    description: 'DISPARO ASINCRONO MULTIAGENTE: Lanza una tarea en background y retorna un task_id de inmediato (<50ms) sin bloquear a Antigravity, permitiendo lanzar enjambres de modelos en paralelo.',
+    description: 'Lanza una tarea asincrona en background hacia cualquier modelo de OpenCode (o continua una sesion con session_id) y retorna un jobId de inmediato sin bloquear el turno.',
     parameters: {
-      task: z.string().describe('Instruccion tecnica detallada para el worker externo'),
-      model: z.string().optional().default(CONFIG.defaultModel).describe('Modelo objetivo (ej. opencode/nemotron-3.5-lightning-free, opencode/nemotron-3.5-super-vl-free, opencode/deepseek-v4.1-flash-free)'),
-      working_dir: z.string().optional().describe('Directorio absoluto de trabajo. Si se omite, opera en sandbox aislado.'),
-      read_only: z.boolean().optional().default(false).describe('Si es true, no altera archivos en disco y reduce el consumo de tokens al minimo.'),
+      task: z.string().describe('Instruccion o mensaje para la sesion en OpenCode'),
+      model: z.string().optional().describe('Modelo objetivo en formato provider/model (opcional; si se omite usa OPENCODE_DEFAULT_MODEL o el activo en OpenCode)'),
+      session_id: z.string().optional().describe('ID de una sesion existente de OpenCode para continuar una conversacion multi-turno'),
+      fallback_models: z.array(z.string()).optional().describe('Lista opcional de modelos de respaldo ante errores 429/5xx'),
+      working_dir: z.string().optional().describe('Directorio absoluto de trabajo. Si se omite y read_only es true, opera en sandbox aislado.'),
+      read_only: z.boolean().optional().default(false).describe('Si es true, indica no alterar archivos en disco.'),
       timeout_seconds: z.number().optional().default(600).describe('Tiempo maximo de espera en segundos'),
-      call_depth: z.number().optional().default(0).describe('Profundidad de llamada para prevenir recursión (tope maxDepth = 2)')
+      call_depth: z.number().optional().default(0).describe('Profundidad de llamada para prevenir recursion')
     },
     execute: async (args) => {
       try {
@@ -142,7 +149,7 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_check_task',
-    description: 'Comprueba el estado de una tarea asincrona previa lanzada con openbridge_start_task y recolecta el resultado cuando este completada.',
+    description: 'Comprueba el estado de una tarea asincrona previa lanzada con openbridge_start_task y recolecta resultado, tokens y diffs cuando este completada.',
     parameters: {
       task_id: z.string().describe('Identificador unico de la tarea (ej. job_xxxxxxxx)')
     },
@@ -182,7 +189,7 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_list_active_tasks',
-    description: 'Lista todas las tareas asincronas activas o recientes en el gestor de enjambres de OpenBridge.',
+    description: 'Lista los jobs registrados recientemente en OpenBridge (activos o completados).',
     parameters: {
       limit: z.number().optional().default(20).describe('Cantidad maxima de tareas a listar')
     },
@@ -201,8 +208,58 @@ export const TOOLS = [
     }
   },
   {
+    name: 'openbridge_list_sessions',
+    description: 'Lista las sesiones recientes directamente desde el daemon de OpenCode (incluyendo sesiones creadas fuera de OpenBridge) para inspeccionarlas o continuarlas.',
+    parameters: {
+      limit: z.number().optional().default(20).describe('Cantidad maxima de sesiones recientes a listar')
+    },
+    execute: async ({ limit }) => {
+      try {
+        const sessions = await client.listSessions(limit);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ total: sessions.length, sessions }, null, 2)
+            }
+          ]
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Error al listar sesiones de OpenCode: ${err.message}` }]
+        };
+      }
+    }
+  },
+  {
+    name: 'openbridge_get_messages',
+    description: 'Lee el historial de mensajes (usuario, respuestas de IA, herramientas y tokens) de cualquier sesion existente en OpenCode.',
+    parameters: {
+      session_id: z.string().describe('ID de la sesion de OpenCode (ej. ses_xxxxxxxx)'),
+      limit: z.number().optional().default(50).describe('Cantidad maxima de mensajes recientes a devolver'),
+      include_reasoning: z.boolean().optional().default(false).describe('Si es true, incluye los bloques de razonamiento interno del modelo')
+    },
+    execute: async ({ session_id, limit, include_reasoning }) => {
+      try {
+        const transcript = await client.readSessionMessages(session_id, {
+          limit,
+          includeReasoning: include_reasoning
+        });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(transcript, null, 2) }]
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Error al leer mensajes de la sesion: ${err.message}` }]
+        };
+      }
+    }
+  },
+  {
     name: 'openbridge_get_diff',
-    description: 'Recupera los diffs de Git o archivos generados durante una sesion previa delegada a OpenCode para auditar antes de fusionar.',
+    description: 'Recupera los diffs de Git o archivos generados durante una sesion de OpenCode para auditar antes de fusionar.',
     parameters: {
       session_id: z.string().describe('ID de la sesion de OpenCode')
     },
@@ -227,7 +284,7 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_status',
-    description: 'Verifica el estado del daemon local de OpenCode, transporte SSE y conectividad.',
+    description: 'Verifica el estado del daemon local de OpenCode, transporte SSE, configuracion del puente y salud de modelos observados.',
     parameters: {},
     execute: async () => {
       try {
@@ -242,9 +299,8 @@ export const TOOLS = [
                   status: auth.ok ? 'ONLINE' : 'OFFLINE',
                   eventStreamConnected: eventStream.connected,
                   defaultModel: CONFIG.defaultModel,
-                  multimodalModel: CONFIG.multimodalModel,
+                  fallbackModels: CONFIG.fallbackModels,
                   maxRecursionDepth: CONFIG.maxDepth,
-                  dashboardAuth: CONFIG.dashboardAuthEnabled ? 'ENABLED' : 'DISABLED',
                   payloadSegregation: 'ACTIVE',
                   modelPoolHealth: getModelHealthMap(),
                   details: auth.data || auth.error || 'Server ready'

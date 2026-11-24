@@ -1,7 +1,7 @@
 {
   "name": "openbridge-mcp",
-  "version": "1.2.1",
-  "description": "MCP Bridge between Google Antigravity and OpenCode Zen Free Models with Real-Time SSE and Multi-Agent Swarms",
+  "version": "2.0.0",
+  "description": "Decentralized MCP Bridge connecting MCP clients (such as Google Antigravity / Gemini) with any AI model and provider exposed by OpenCode",
   "main": "src/index.js",
   "type": "module",
   "author": "MGSCO <https://github.com/MGSCOfficial>",
@@ -19,18 +19,17 @@
     "model-context-protocol",
     "antigravity",
     "opencode",
-    "nemotron",
-    "deepseek",
-    "ai-agents",
-    "swarm"
+    "ai-bridge",
+    "multi-provider",
+    "ai-agents"
   ],
   "bin": {
     "openbridge-mcp": "./src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
-    "test": "npm run check && node test/test-grietas-remediation.js && node test/test-auto-handoff.js && node test/test-v1.2.0-improvements.js",
-    "test:v120": "node test/test-v1.2.0-improvements.js",
+    "test": "npm run check && node test/test-grietas-remediation.js && node test/test-auto-handoff.js && node test/test-v2-bridge.js",
+    "test:bridge": "node test/test-v2-bridge.js",
     "test:p01": "node test/test-p01.js",
     "test:p02": "node test/test-p02.js",
     "test:remediation": "node test/test-grietas-remediation.js",

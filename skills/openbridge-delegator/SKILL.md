@@ -1,73 +1,49 @@
 ---
 name: openbridge-delegator
-description: Orquesta la delegación inteligente de tareas de código, pruebas unitarias y escaneo masivo hacia modelos gratuitos de OpenCode Zen (NVIDIA Nemotron 3.5 Lightning Free, Super VL Free, Gemma o DeepSeek Flash) a través de OpenBridge MCP, ahorrando el 100% de cuota de Gemini en Antigravity para tareas mecánicas.
+description: Puente MCP descentralizado para conectar Antigravity/Gemini con cualquier modelo o proveedor configurado en OpenCode, con ejecución síncrona/asíncrona, sesiones multi-turno y lectura de historial.
 ---
 
-# OPENBRIDGE GOVERNANCE & TASK DELEGATION SKILL (v1.1)
+# OPENBRIDGE MCP BRIDGE GUIDE (v2.0)
 
-> 🔗 **Repositorio Oficial en GitHub**: [https://github.com/MGSCOfficial/openbridge](https://github.com/MGSCOfficial/openbridge)  
-> 👤 **Autor y Mantenedor**: MGSCO ([@MGSCOfficial](https://github.com/MGSCOfficial))
+> 🔗 **Repositorio Oficial**: [https://github.com/MGSCOfficial/openbridge](https://github.com/MGSCOfficial/openbridge)  
+> 👤 **Autor**: MGSCO ([@MGSCOfficial](https://github.com/MGSCOfficial))
 
-Guía de gobernanza agéntica para la orquestación y delegación estratégica de tareas de código entre **Google Antigravity (Gemini 3.8)** y los modelos worker de **OpenCode Zen Free Tier** (con foco en **NVIDIA Nemotron 3.5 Lightning Free**, **Super VL Free** y **DeepSeek V4.1 Flash**) a través del servidor MCP `openbridge`.
-
----
-
-## 1. PRINCIPIOS DE ARBITRAJE DE CUOTA (CUÁNDO DELEGAR)
-
-El objetivo central de OpenBridge es preservar la cuota de contexto y llamadas por minuto de Gemini 3.8 en Antigravity, delegando trabajo mecánico intensivo en tokens a modelos gratuitos de alta capacidad.
-
-### Matriz de Decisión:
-
-| Dominio Técnico | Ejecutor Óptimo | Razón Técnica |
-| :--- | :--- | :--- |
-| **Arquitectura de Sistemas y Triage** | 🟢 **Gemini 3.8 (Antigravity)** | Requiere visión holística, razonamiento abstracto y diseño de contratos. |
-| **Descomposición Anatómica de Tareas** | 🟢 **Gemini 3.8 (Antigravity)** | Metodología `agentic-task-orchestrator`, inventario y grafo DAG. |
-| **Auditoría de Seguridad y Code Review** | 🟢 **Gemini 3.8 (Antigravity)** | Auditoría adversaria de diffs antes de fusionar o commitear. |
-| **Generación Masiva de Tests Unitarios** | ⚡ **Nemotron 3.5 Lightning** | Tarea repetitiva de alto consumo de tokens. Genera suites completas a coste $0. |
-| **Análisis de UI / Diagramas / Frontend** | ⚡ **Nemotron 3.5 Super VL** | Razonamiento multimodal avanzado para maquetas y capturas visuales. |
-| **Scaffolding y Expansión de Boilerplate** | ⚡ **DeepSeek V4.1 Flash / Nemotron** | Creación rápida de interfaces, DTOs, mappers y esquemas repetitivos. |
-| **Barrido de Logs y Diagnóstico de Errores**| ⚡ **Flash / Nemotron (OpenBridge)** | Consumo masivo de contexto sin agotar la cuota de la sesión principal. |
+OpenBridge es un **puente agnóstico bajo Model Context Protocol (MCP)** entre cualquier cliente MCP (como Google Antigravity / Gemini) y cualquier inteligencia artificial expuesta por el daemon local de **OpenCode** (sin importar el proveedor: `opencode`, `openrouter`, `anthropic`, `openai`, `google`, `ollama`, etc.).
 
 ---
 
-## 2. HERRAMIENTAS MCP DE OPENBRIDGE v1.1
+## 1. DESCUBRIMIENTO DESCENTRALIZADO DE MODELOS
 
-### A. Modo Asíncrono No Bloqueante (Enjambres Multiagente / Swarm)
-Para disparar múltiples modelos en paralelo sin congelar el turno de Antigravity:
+Nunca asumas modelos fijos ni nombres de proveedores hardcodeados; consulta en tiempo real qué tiene disponible tu instancia de OpenCode:
 
-1. **`openbridge_start_task`**:
-   - Dispara una tarea en background y retorna de inmediato (`<50ms`) con un `task_id` (ej. `job_bfa16c0a`).
-   - Parámetros: `task` (string), `model` (opcional), `working_dir` (opcional), `read_only` (boolean), `timeout_seconds` (número).
-2. **`openbridge_check_task`**:
-   - Consulta el estado del `task_id`. Retorna `status: 'RUNNING'` con el tiempo transcurrido o `status: 'COMPLETED'` con el resultado, métricas de tokens y diffs generados.
-3. **`openbridge_cancel_task`**:
-   - Interrumpe de forma limpia una tarea en vuelo si ya no es necesaria.
-4. **`openbridge_list_active_tasks`**:
-   - Visualiza el tablero de control de todos los workers activos.
-
-### B. Modo Síncrono Directo
-5. **`openbridge_delegate_task`**:
-   - Ejecución bloqueante con latencia mínima impulsada por Server-Sent Events (SSE) en tiempo real. Ideal para consultas puntuales donde Antigravity necesita el resultado en el mismo turno.
-
-### C. Utilidades de Entorno
-6. **`openbridge_list_models`**: Catálogo de 22 modelos gratuitos (filtrables por proveedor o búsqueda).
-7. **`openbridge_get_diff`**: Inspección aislada de parches Git producidos en una sesión.
-8. **`openbridge_status`**: Salud del daemon local y bus de eventos SSE.
+1. Llama a `openbridge_list_models({ provider: "all", free_only: false })` (o filtra por `provider`, `search` o `free_only: true`).
+2. Usa el campo `fullId` retornado (formato `provider/model`, ej. `opencode/deepseek-v4.1-flash-free` o `openrouter/...`) en `model`.
+3. Si omites `model`, OpenCode utilizará su modelo activo por defecto (o `OPENCODE_DEFAULT_MODEL` si está definido).
 
 ---
 
-## 3. PROTOCOLO DE ENJAMBRE MULTIAGENTE (*PARALLEL SWARM*)
+## 2. HERRAMIENTAS DEL PUENTE (10 TOOLS)
 
-Cuando Antigravity necesite procesar varios problemas independientes a la vez:
+### Ejecución y Enjambres
+- **`openbridge_delegate_task`**: Ejecución síncrona con Auto-Handoff preventivo a los `120s` (si tarda más, pasa a segundo plano retornando `jobId`). Soporta `session_id` para continuar conversaciones multi-turno y `fallback_models` opcional.
+- **`openbridge_start_task`**: Disparo asíncrono inmediato (`<50ms`) que retorna un `jobId` para paralelizar múltiples tareas sin bloquear el turno.
+- **`openbridge_check_task`**: Consulta estado (`RUNNING`, `COMPLETED`, `FAILED`), resultado, tokens, coste reportado y diffs de un `jobId`.
+- **`openbridge_cancel_task`**: Interrumpe limpiamente una tarea en vuelo.
+- **`openbridge_list_active_tasks`**: Lista jobs registrados localmente en OpenBridge.
 
-1. **Disparo Simultáneo en Turno Único**:
-   ```javascript
-   // Ejemplo: Disparo de 3 tareas concurrentes a 3 modelos distintos
-   openbridge_start_task({ task: "Generar tests de ordenamiento", model: "opencode/nemotron-3.5-lightning-free" });
-   openbridge_start_task({ task: "Generar types e interfaces en TS", model: "opencode/deepseek-v4.1-flash-free" });
-   openbridge_start_task({ task: "Auditar contraste y UI accesible", model: "opencode/nemotron-3.5-super-vl-free" });
-   ```
-2. **Recolección No Invasiva**:
-   Antigravity continúa su labor de análisis y, al cabo de unos segundos, invoca `openbridge_check_task` para cada `task_id`.
-3. **Compuerta de Calidad y Fusión**:
-   Se aplican las pruebas nativas (`node --check`, linters o suite de tests del proyecto) y se consolida con micro-commit en Git.
+### Sesiones Multi-Turno, Auditoría y Entorno
+- **`openbridge_list_sessions`**: Lista sesiones recientes directamente desde OpenCode.
+- **`openbridge_get_messages`**: Lee el historial de mensajes, herramientas y tokens de cualquier `session_id` de OpenCode (útil para auditar o retomar contexto).
+- **`openbridge_get_diff`**: Extrae parches Git / archivos modificados de una sesión.
+- **`openbridge_list_models`**: Descubre modelos en cualquier proveedor de OpenCode.
+- **`openbridge_status`**: Verifica conectividad con el daemon, bus SSE y salud de modelos observados.
+
+---
+
+## 3. FLUJO RECOMENDADO
+
+1. **Descubrir**: `openbridge_list_models()` para ver modelos activos en OpenCode.
+2. **Delegar o Continuar**:
+   - Turno nuevo: `openbridge_delegate_task({ task: "...", model: "<provider/model>", read_only: true })`
+   - Continuar conversación: `openbridge_delegate_task({ task: "...", session_id: "<ses_id>" })`
+3. **Auditar antes de integrar**: Inspecciona con `openbridge_get_diff` / `openbridge_get_messages` y valida en tu entorno antes de fusionar cambios.

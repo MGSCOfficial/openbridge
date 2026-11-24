@@ -69,23 +69,29 @@ function resolveServerPassword(dataDir) {
   return generated;
 }
 
+function parseFallbackModels(raw) {
+  if (!raw) return [];
+  return String(raw)
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+}
+
 const dataDir = resolveDataDir();
 
 export const CONFIG = {
   port: parseInt(process.env.OPENCODE_PORT || '4096', 10),
   hostname: process.env.OPENCODE_HOST || '127.0.0.1',
-  defaultModel: process.env.OPENCODE_DEFAULT_MODEL || 'opencode/nemotron-3.5-super-vl-free',
-  multimodalModel: process.env.OPENCODE_MULTIMODAL_MODEL || 'opencode/nemotron-3.5-super-vl-free',
+  defaultModel: process.env.OPENCODE_DEFAULT_MODEL ? process.env.OPENCODE_DEFAULT_MODEL.trim() : null,
+  fallbackModels: parseFallbackModels(process.env.OPENBRIDGE_FALLBACK_MODELS),
   serverUsername: process.env.OPENCODE_SERVER_USERNAME || 'opencode',
   serverPassword: resolveServerPassword(dataDir),
   requestTimeoutMs: parseInt(process.env.OPENCODE_TIMEOUT_MS || '600000', 10),
-  dashboardPort: parseInt(process.env.OPENBRIDGE_DASHBOARD_PORT || '4098', 10),
   cliPath: resolveCliPath(),
   dataDir,
   jobsFile: path.join(dataDir, 'jobs.jsonl'),
   payloadsDir: path.join(dataDir, 'payloads'),
   payloadTtlDays: parseInt(process.env.OPENBRIDGE_PAYLOAD_TTL_DAYS || '7', 10),
-  dashboardAuthEnabled: process.env.OPENBRIDGE_DASHBOARD_NO_AUTH !== '1',
   jobsRetention: parseInt(process.env.OPENBRIDGE_JOBS_RETENTION || '200', 10),
   allowNested: process.env.OPENBRIDGE_ALLOW_NESTED === '1',
   maxDepth: parseInt(process.env.OPENBRIDGE_MAX_DEPTH || '2', 10)
