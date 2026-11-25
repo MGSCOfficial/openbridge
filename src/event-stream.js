@@ -112,13 +112,15 @@ class OpenCodeEventStream extends EventEmitter {
       const handler = (evt) => {
         const type = evt.type || '';
         const outcome = evt.data?.outcome;
+        const errData = evt.data?.error;
 
-        if (type.includes('succeeded') || outcome === 'succeeded' || type.includes('idle')) {
+        if (type.includes('failed') || outcome === 'failed' || errData) {
+          cleanup();
+          const msg = errData?.message || JSON.stringify(evt.data);
+          reject(new Error(`Sesion ${sessionID} fallo: ${msg}`));
+        } else if (type.includes('succeeded') || outcome === 'succeeded' || type.includes('idle')) {
           cleanup();
           resolve(evt.data);
-        } else if (type.includes('failed') || outcome === 'failed') {
-          cleanup();
-          reject(new Error(`Sesion ${sessionID} fallo con evento: ${JSON.stringify(evt.data)}`));
         }
       };
 

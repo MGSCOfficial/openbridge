@@ -398,6 +398,7 @@ class JobManager extends EventEmitter {
         job.completedAt = Date.now();
         job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
         job.error = err.message;
+        job.providerError = err.providerError || null;
         this.emit('task_failed', job);
       } finally {
         if (job.status !== 'RUNNING' && job.sandboxDir) {
@@ -439,7 +440,8 @@ class JobManager extends EventEmitter {
       diffsCount: effectiveDiffs.length,
       diffs: effectiveDiffs,
       response: effectiveResult,
-      error: job.error
+      error: job.error,
+      providerError: job.providerError || null
     };
   }
 

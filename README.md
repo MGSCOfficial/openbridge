@@ -1,4 +1,4 @@
-# OpenBridge MCP (v2.0.0)
+# OpenBridge MCP (v2.1.0)
 
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
 > OpenBridge se encuentra en evolución continua. Es un puente agnóstico para conectar clientes MCP con OpenCode.
@@ -30,7 +30,7 @@
 
 ---
 
-## 🛠️ Herramientas MCP Expuestas (10)
+## 🛠️ Herramientas MCP Expuestas (11)
 
 | Herramienta | Categoría | Descripción |
 | :--- | :---: | :--- |
@@ -41,8 +41,9 @@
 | `openbridge_cancel_task` | **Control** | Interrumpe de forma limpia una tarea en ejecución. |
 | `openbridge_list_active_tasks` | **Control** | Lista jobs recientes registrados en OpenBridge. |
 | `openbridge_list_sessions` | **Sesiones** | Lista sesiones recientes directamente desde OpenCode. |
-| `openbridge_get_messages` | **Sesiones** | Lee el historial de mensajes y bloques de texto/razonamiento de cualquier `session_id`. |
+| `openbridge_get_messages` | **Sesiones** | Lee el historial de mensajes, errores de proveedor y bloques de texto/razonamiento de cualquier `session_id`. |
 | `openbridge_get_diff` | **Auditoría** | Extrae diffs de archivos modificados durante una sesión de OpenCode. |
+| `openbridge_usage_stats` | **Consumo** | Consulta tokens gastados por modelo, presupuestos de Console/Go y mensajes `429` recientes con su hora de renovación. |
 | `openbridge_status` | **Diagnóstico** | Verifica salud del daemon OpenCode, transporte SSE, configuración y modelos observados. |
 
 ---

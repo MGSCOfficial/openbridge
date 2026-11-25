@@ -22,7 +22,7 @@ Nunca asumas modelos fijos ni nombres de proveedores hardcodeados; consulta en t
 
 ---
 
-## 2. HERRAMIENTAS DEL PUENTE (10 TOOLS)
+## 2. HERRAMIENTAS DEL PUENTE (11 TOOLS)
 
 ### Ejecución y Enjambres
 - **`openbridge_delegate_task`**: Ejecución síncrona con Auto-Handoff preventivo a los `120s` (si tarda más, pasa a segundo plano retornando `jobId`). Soporta `session_id` para continuar conversaciones multi-turno y `fallback_models` opcional.
@@ -36,6 +36,7 @@ Nunca asumas modelos fijos ni nombres de proveedores hardcodeados; consulta en t
 - **`openbridge_get_messages`**: Lee el historial de mensajes, herramientas y tokens de cualquier `session_id` de OpenCode (útil para auditar o retomar contexto).
 - **`openbridge_get_diff`**: Extrae parches Git / archivos modificados de una sesión.
 - **`openbridge_list_models`**: Descubre modelos en cualquier proveedor de OpenCode.
+- **`openbridge_usage_stats`**: Consulta tokens gastados por modelo, límites de OpenCode Console/Go (si existen) y mensajes `429` recientes con su hora de renovación.
 - **`openbridge_status`**: Verifica conectividad con el daemon, bus SSE y salud de modelos observados.
 
 ---

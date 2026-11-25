@@ -170,7 +170,7 @@ async function testP02ConfigurableFallbackResend() {
 }
 
 async function testToolsUnified() {
-  assert.strictEqual(TOOLS.length, 10, 'deben existir exactamente 10 tools del puente');
+  assert.strictEqual(TOOLS.length, 11, 'deben existir exactamente 11 tools del puente');
   assert.strictEqual(typeof registerAllTools, 'function', 'registerAllTools debe exportarse');
   const names = TOOLS.map((t) => t.name).sort();
   assert.deepStrictEqual(names, [
@@ -183,7 +183,8 @@ async function testToolsUnified() {
     'openbridge_list_models',
     'openbridge_list_sessions',
     'openbridge_start_task',
-    'openbridge_status'
+    'openbridge_status',
+    'openbridge_usage_stats'
   ]);
   for (const toolName of ['openbridge_delegate_task', 'openbridge_start_task']) {
     const params = TOOLS.find((t) => t.name === toolName).parameters;

@@ -283,6 +283,32 @@ export const TOOLS = [
     }
   },
   {
+    name: 'openbridge_usage_stats',
+    description: 'Consulta tokens gastados por modelo en OpenCode, limites oficiales de OpenCode Console/Go (si hay sesion iniciada) y mensajes recientes de cuota/rate-limit (429) con la hora exacta de renovacion.',
+    parameters: {
+      days: z.number().optional().default(0).describe('Ventana en dias hacia atras (0 = solo hoy, 7 = ultimos 7 dias)'),
+      all: z.boolean().optional().default(false).describe('Si es true, devuelve el acumulado historico completo'),
+      session_scan_limit: z.number().optional().default(10).describe('Cantidad de sesiones recientes a inspeccionar para avisos de limite/renovacion')
+    },
+    execute: async ({ days, all, session_scan_limit }) => {
+      try {
+        const usage = await client.getUsageStats({
+          days,
+          all,
+          sessionScanLimit: session_scan_limit
+        });
+        return {
+          content: [{ type: 'text', text: JSON.stringify(usage, null, 2) }]
+        };
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Error al consultar estadisticas de uso: ${err.message}` }]
+        };
+      }
+    }
+  },
+  {
     name: 'openbridge_status',
     description: 'Verifica el estado del daemon local de OpenCode, transporte SSE, configuracion del puente y salud de modelos observados.',
     parameters: {},

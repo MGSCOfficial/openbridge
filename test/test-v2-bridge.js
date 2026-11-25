@@ -207,11 +207,126 @@ async function testPayloadSegregationAndManifest() {
   const indexSource = fs.readFileSync(path.join(root, 'src', 'index.js'), 'utf8');
   const indexVersion = (indexSource.match(/version:\s*'([^']+)'/) || [])[1];
 
-  assert.strictEqual(manifest.version, '2.0.0');
-  assert.strictEqual(pkg.version, '2.0.0');
-  assert.strictEqual(indexVersion, '2.0.0');
+  assert.strictEqual(manifest.version, '2.1.0');
+  assert.strictEqual(pkg.version, '2.1.0');
+  assert.strictEqual(indexVersion, '2.1.0');
   assert.ok(!fs.existsSync(path.join(root, 'src', 'dashboard.js')), 'dashboard.js debe haber sido eliminado');
-  console.log('  ✅ Segregación y manifiesto v2.0.0 PASS.');
+  console.log('  ✅ Segregación y manifiesto v2.1.0 PASS.');
+}
+
+async function testUsageStatsAndRateLimitPropagation() {
+  console.log('\n[TEST 5] Telemetría de uso, errores de límite y hora de renovación...');
+  const orig = {
+    request: client.request,
+    getSessionMessages: client.getSessionMessages,
+    getSessionDiff: client.getSessionDiff
+  };
+
+  try {
+    const occurredAt = new Date('2026-11-25T14:40:00.000Z').getTime();
+    const retryAfterMs = 6 * 3600 * 1000 + 5 * 60 * 1000; // +6h 5m
+
+    // 5a. waitForCompletion debe fallar exponiendo mensaje literal de OpenCode y resetsAt (nunca falso COMPLETED)
+    client.request = async (reqPath) => {
+      if (reqPath === '/api/session/ses_limit') {
+        return { id: 'ses_limit', time: { created: occurredAt - 1000, busy: occurredAt - 500, idle: occurredAt } };
+      }
+      if (reqPath.startsWith('/api/experimental/session/stats')) {
+        return {
+          sessions: 4,
+          prompts: 9,
+          steps: 25,
+          tokens: { input: 1200, output: 300, reasoning: 150, cache: { read: 5000, write: 0 } },
+          cost: 0,
+          models: [
+            {
+              model: { id: 'deepseek-v4.1-flash-free', providerID: 'opencode', variant: 'default' },
+              steps: 25,
+              tokens: { input: 1200, output: 300, reasoning: 150, cache: { read: 5000, write: 0 } },
+              cost: 0
+            }
+          ]
+        };
+      }
+      if (reqPath === '/api/experimental/usage/limits') {
+        return null;
+      }
+      if (reqPath === '/api/session') {
+        return [
+          {
+            id: 'ses_limit',
+            title: 'Límite DeepSeek',
+            model: { providerID: 'opencode', id: 'deepseek-v4.1-flash-free' },
+            tokens: { input: 0, output: 0, reasoning: 0 },
+            time: { created: occurredAt - 1000, updated: occurredAt, idle: occurredAt }
+          }
+        ];
+      }
+      return [];
+    };
+
+    client.getSessionMessages = async () => [
+      { id: 'u1', type: 'user', time: { created: occurredAt - 800 }, text: 'Hola' },
+      {
+        id: 'a1',
+        type: 'assistant',
+        time: { created: occurredAt - 500, completed: occurredAt },
+        model: { providerID: 'opencode', id: 'deepseek-v4.1-flash-free' },
+        content: [],
+        finish: 'error',
+        error: {
+          type: 'provider.free-limit',
+          status: 429,
+          message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go.',
+          retryAfterMs
+        }
+      },
+      {
+        id: 'i1',
+        type: 'idle',
+        outcome: 'failed',
+        time: { created: occurredAt },
+        error: {
+          type: 'provider.free-limit',
+          status: 429,
+          message: 'Free usage limit reached. Connect a provider or subscribe to OpenCode Go.',
+          retryAfterMs
+        }
+      }
+    ];
+    client.getSessionDiff = async () => [];
+
+    let caughtErr = null;
+    try {
+      await client.waitForCompletion('ses_limit', 5000, occurredAt - 900);
+    } catch (e) {
+      caughtErr = e;
+    }
+    assert.ok(caughtErr, 'waitForCompletion debe lanzar Error ante idle outcome=failed');
+    assert.ok(caughtErr.message.includes('Free usage limit reached'), 'Debe propagar el mensaje exacto de OpenCode');
+    assert.ok(caughtErr.providerError?.resetsAtIso, 'Debe calcular resetsAtIso desde retryAfterMs');
+    assert.strictEqual(caughtErr.providerError.status, 429);
+
+    // 5b. readSessionMessages debe incluir latestError y el mensaje idle fallido
+    const transcript = await client.readSessionMessages('ses_limit');
+    assert.ok(transcript.latestError, 'readSessionMessages debe exponer latestError');
+    assert.strictEqual(transcript.latestError.type, 'provider.free-limit');
+    assert.ok(transcript.messages.some((m) => m.type === 'idle' && m.error), 'Debe conservar eventos idle con error');
+
+    // 5c. getUsageStats debe agregar tokens, limits y avisos recientes de renovación
+    const usage = await client.getUsageStats({ days: 0 });
+    assert.strictEqual(usage.totals.tokens.totalDirect, 1650);
+    assert.strictEqual(usage.totals.tokens.cacheRead, 5000);
+    assert.strictEqual(usage.byModel[0].model, 'opencode/deepseek-v4.1-flash-free');
+    assert.strictEqual(usage.providerLimits.remainingFreeQuotaKnown, false);
+    assert.strictEqual(usage.recentProviderNotices.length, 1);
+    assert.strictEqual(usage.recentProviderNotices[0].status, 429);
+    assert.ok(usage.recentProviderNotices[0].resetsAtIso);
+
+    console.log('  ✅ Telemetría de uso, errores de límite y hora de renovación PASS.');
+  } finally {
+    Object.assign(client, orig);
+  }
 }
 
 async function run() {
@@ -220,10 +335,11 @@ async function run() {
     await testDynamicCircuitBreaker();
     await testMultiTurnAndSessionReading();
     await testPayloadSegregationAndManifest();
-    console.log('\n🎯 [100% PASS] OpenBridge v2.0.0 certificado como puente descentralizado.');
+    await testUsageStatsAndRateLimitPropagation();
+    console.log('\n🎯 [100% PASS] OpenBridge v2.1.0 certificado como puente descentralizado.');
     process.exitCode = 0;
   } catch (err) {
-    console.error('\n❌ ERROR EN TEST v2.0.0:', err);
+    console.error('\n❌ ERROR EN TEST v2.1.0:', err);
     process.exitCode = 1;
   } finally {
     try {
