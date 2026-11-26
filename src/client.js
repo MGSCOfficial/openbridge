@@ -301,11 +301,21 @@ class OpenCodeClient {
   }
 
   async createSession(options = {}) {
-    const { title = 'openbridge-task', model = CONFIG.defaultModel, directory = null } = options;
+    const {
+      title = 'openbridge-task',
+      model = CONFIG.defaultModel,
+      agent = null,
+      variant = null,
+      directory = null
+    } = options;
     const body = { title };
 
     if (directory) {
       body.location = { directory };
+    }
+
+    if (agent) {
+      body.agent = agent;
     }
 
     if (model) {
@@ -317,6 +327,9 @@ class OpenCodeClient {
         };
       } else {
         body.model = { id: model };
+      }
+      if (variant) {
+        body.model.variant = variant;
       }
     }
 

@@ -52,6 +52,10 @@ class JobManager extends EventEmitter {
     }
   }
 
+  _getFullPrompt(job) {
+    return job.promptText || this._loadPayload(job.jobId)?.promptText || job.promptPreview || job.task;
+  }
+
   _prunePayloads() {
     if (!CONFIG.payloadsDir || !fs.existsSync(CONFIG.payloadsDir)) return;
     if (Date.now() - this._lastPayloadPrune < 10 * 60 * 1000) return;
@@ -99,11 +103,12 @@ class JobManager extends EventEmitter {
       const tmpFile = `${CONFIG.jobsFile}.tmp`;
       const lines = Array.from(this.jobs.values())
         .map((j) => {
-          if (CONFIG.payloadsDir && (j.result || j.diffs?.length > 0)) {
+          const hasLargePrompt = Boolean(j.promptText && j.promptText.length > 300);
+          if (CONFIG.payloadsDir && (j.result || j.diffs?.length > 0 || hasLargePrompt)) {
             const payloadPath = path.join(CONFIG.payloadsDir, `${j.jobId}.json`);
             if (!fs.existsSync(payloadPath)) {
               this._savePayload(j.jobId, {
-                promptText: j.promptText,
+                promptText: j.promptText || this._getFullPrompt(j),
                 result: j.result,
                 diffs: j.diffs,
                 savedAt: Date.now()
@@ -111,6 +116,10 @@ class JobManager extends EventEmitter {
             }
           }
           const record = { ...j };
+          if (hasLargePrompt) {
+            record.promptPreview = record.promptText.slice(0, 300) + '...';
+            delete record.promptText;
+          }
           if (record.result && record.result.length > 300) {
             record.resultPreview = record.result.slice(0, 300) + '...';
             delete record.result;
@@ -166,12 +175,18 @@ class JobManager extends EventEmitter {
 
         if (!isIdle) {
           const recoverDir = job.sandboxDir && fs.existsSync(job.sandboxDir) ? job.sandboxDir : null;
-          this._trackJobBackground(job, 600, recoverDir, job.promptText || '');
+          this._trackJobBackground(job, 600, recoverDir, this._getFullPrompt(job));
           continue;
         }
 
-        const result = await client.waitForCompletion(job.sessionID, 5000, job.afterTimestamp || 0).catch(() => null);
-        if (!result) {
+        let result = null;
+        try {
+          result = await client.waitForCompletion(job.sessionID, 5000, job.afterTimestamp || 0);
+        } catch (waitErr) {
+          if (waitErr?.providerError) {
+            job.providerError = waitErr.providerError;
+            throw waitErr;
+          }
           throw new Error('[RECOVERY_INCOMPLETE] La sesión está idle pero no se pudo recolectar el resultado');
         }
 
@@ -179,14 +194,16 @@ class JobManager extends EventEmitter {
         job.completedAt = Date.now();
         job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
         job.outcome = result.outcome;
-        job.modelUsed = result.model?.id || job.model;
+        job.modelUsed = result.model
+          ? (result.model.providerID ? `${result.model.providerID}/${result.model.id}` : result.model.id)
+          : job.model;
         job.tokens = result.tokens;
         job.cost = result.cost ?? null;
         job.diffs = result.diffs || [];
         job.result = result.text;
         recordModelSuccess(job.modelUsed || job.model, job.fallbackModels);
         this._savePayload(job.jobId, {
-          promptText: job.promptText,
+          promptText: this._getFullPrompt(job),
           result: job.result,
           diffs: job.diffs,
           completedAt: job.completedAt
@@ -195,7 +212,10 @@ class JobManager extends EventEmitter {
         job.status = 'FAILED';
         job.completedAt = Date.now();
         job.durationSeconds = Math.round((job.completedAt - (job.startedAt || job.completedAt)) / 1000);
-        job.error = `Recuperación post-reinicio: ${err.message}`;
+        if (err?.providerError && !job.providerError) {
+          job.providerError = err.providerError;
+        }
+        job.error = job.providerError ? err.message : `Recuperación post-reinicio: ${err.message}`;
       }
     }
     this._saveJobs();
@@ -205,6 +225,8 @@ class JobManager extends EventEmitter {
     const {
       task,
       model = CONFIG.defaultModel,
+      agent = null,
+      variant = null,
       session_id = null,
       fallback_models = null,
       working_dir = null,
@@ -246,7 +268,6 @@ class JobManager extends EventEmitter {
     let afterTimestamp = 0;
 
     if (resumedSession) {
-      // Continuación de sesión existente: no crear sesión ni conmutar de modelo en silencio.
       const sentAt = Date.now();
       const promptRes = await client.sendPrompt(session_id, promptText);
       sessionID = session_id;
@@ -269,6 +290,8 @@ class JobManager extends EventEmitter {
           candidateSessionID = await client.createSession({
             title: `openbridge-${jobId}`,
             model: activeModel,
+            agent,
+            variant,
             directory: effectiveDir
           });
           const promptRes = await client.sendPrompt(candidateSessionID, promptText);
@@ -302,6 +325,8 @@ class JobManager extends EventEmitter {
       sessionID,
       resumedSession,
       model: activeModel,
+      agent: agent || null,
+      variant: variant || null,
       initialModel: model || null,
       fallbackModels: fallbackChain,
       afterTimestamp,
@@ -332,6 +357,8 @@ class JobManager extends EventEmitter {
       sessionID,
       resumedSession,
       model: activeModel || 'opencode-default',
+      agent: agent || null,
+      variant: variant || null,
       status: 'RUNNING',
       startedAt: new Date(job.startedAt).toISOString(),
       callDepth: declaredDepth,
@@ -360,7 +387,7 @@ class JobManager extends EventEmitter {
         job.result = result.text;
         recordModelSuccess(job.modelUsed || job.model, job.fallbackModels);
         this._savePayload(job.jobId, {
-          promptText: job.promptText,
+          promptText: promptText || this._getFullPrompt(job),
           result: job.result,
           diffs: job.diffs,
           completedAt: job.completedAt
@@ -380,15 +407,18 @@ class JobManager extends EventEmitter {
           );
           try {
             const sentAt = Date.now();
+            const fullPrompt = promptText || this._getFullPrompt(job);
             const newSessionID = await client.createSession({
               title: `openbridge-${job.jobId}-fallback`,
               model: nextModel,
+              agent: job.agent || null,
+              variant: job.variant || null,
               directory: job.sandboxDir || effectiveDir
             });
             job.sessionID = newSessionID;
-            const promptRes = await client.sendPrompt(newSessionID, promptText || job.promptText || job.task);
+            const promptRes = await client.sendPrompt(newSessionID, fullPrompt);
             job.afterTimestamp = promptRes?.time?.created || sentAt;
-            return this._trackJobBackground(job, timeoutSeconds, effectiveDir, promptText);
+            return this._trackJobBackground(job, timeoutSeconds, effectiveDir, fullPrompt);
           } catch (fallbackErr) {
             err = fallbackErr;
           }
@@ -429,6 +459,8 @@ class JobManager extends EventEmitter {
       sessionID: job.sessionID,
       resumedSession: Boolean(job.resumedSession),
       model: job.modelUsed || job.model || 'opencode-default',
+      agent: job.agent || null,
+      variant: job.variant || null,
       initialModel: job.initialModel || null,
       fallbackFrom: job.fallbackFrom || null,
       callDepth: job.callDepth || 0,
@@ -486,9 +518,39 @@ class JobManager extends EventEmitter {
     this._saveJobs();
 
     return {
+      found: true,
       jobId,
+      sessionID: job.sessionID,
       status: 'CANCELLED',
       message: `Tarea ${jobId} interrumpida correctamente`
+    };
+  }
+
+  async cancelSession(sessionID) {
+    await client.interruptSession(sessionID);
+    const cancelledJobs = [];
+
+    for (const job of this.jobs.values()) {
+      if (job.sessionID === sessionID && job.status === 'RUNNING') {
+        job.status = 'CANCELLED';
+        job.completedAt = Date.now();
+        job.durationSeconds = Math.round((job.completedAt - job.startedAt) / 1000);
+        if (job.sandboxDir) {
+          cleanupSandbox(job.jobId);
+        }
+        cancelledJobs.push(job.jobId);
+      }
+    }
+
+    if (cancelledJobs.length > 0) {
+      this._saveJobs();
+    }
+
+    return {
+      sessionID,
+      status: 'CANCELLED',
+      cancelledJobs,
+      message: `Sesión ${sessionID} interrumpida en OpenCode`
     };
   }
 

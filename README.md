@@ -1,4 +1,4 @@
-# OpenBridge MCP (v2.1.0)
+# OpenBridge MCP (v2.2.0)
 
 > **⚠️ AVISO DE ESTADO: PROYECTO EN FASE BETA Y DESARROLLO ACTIVO**  
 > OpenBridge se encuentra en evolución continua. Es un puente agnóstico para conectar clientes MCP con OpenCode.
@@ -35,10 +35,10 @@
 | Herramienta | Categoría | Descripción |
 | :--- | :---: | :--- |
 | `openbridge_list_models` | **Catálogo** | Descubre modelos disponibles en cualquier proveedor configurado en OpenCode (`provider`, `free_only`, `search`). |
-| `openbridge_delegate_task` | **Síncrono** | Envía un prompt a cualquier modelo (o continúa una sesión con `session_id`) con auto-handoff preventivo a los 120s. |
+| `openbridge_delegate_task` | **Síncrono** | Envía un prompt a cualquier modelo/agente/variante (o continúa una sesión con `session_id`) con auto-handoff preventivo a los 120s. |
 | `openbridge_start_task` | **Asíncrono** | Lanza una tarea en background retornando un `jobId` inmediato para paralelizar peticiones. |
 | `openbridge_check_task` | **Consulta** | Consulta estado, resultado, tokens, coste reportado y diffs de un `jobId`. |
-| `openbridge_cancel_task` | **Control** | Interrumpe de forma limpia una tarea en ejecución. |
+| `openbridge_cancel_task` | **Control** | Interrumpe de forma limpia una tarea (`task_id`) o cualquier sesión activa de OpenCode (`session_id`). |
 | `openbridge_list_active_tasks` | **Control** | Lista jobs recientes registrados en OpenBridge. |
 | `openbridge_list_sessions` | **Sesiones** | Lista sesiones recientes directamente desde OpenCode. |
 | `openbridge_get_messages` | **Sesiones** | Lee el historial de mensajes, errores de proveedor y bloques de texto/razonamiento de cualquier `session_id`. |
@@ -101,7 +101,6 @@ npm install
 | `OPENBRIDGE_CIRCUIT_BREAKER_MS` | `60000` | Enfriamiento para modelos con 2 fallos recuperables consecutivos |
 | `OPENCODE_SERVER_PASSWORD` | token en `~/.openbridge/token` | Credencial explícita del daemon OpenCode |
 | `OPENBRIDGE_DATA_DIR` | `~/.openbridge` | Directorio para `token`, `jobs.jsonl` y `payloads/` |
-| `OPENBRIDGE_ALLOW_LEGACY` | `0` | Puente temporal de migración para token legacy (`1` para activar) |
 | `OPENBRIDGE_ALLOW_NESTED` | `0` | Permite delegación anidada desde workers (`1` para habilitar) |
 | `OPENBRIDGE_MAX_DEPTH` | `2` | Tope de profundidad cuando `OPENBRIDGE_ALLOW_NESTED=1` |
 | `OPENBRIDGE_JOBS_RETENTION` | `200` | Máximo de jobs retenidos en `jobs.jsonl` |

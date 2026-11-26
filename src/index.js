@@ -6,7 +6,7 @@ import { registerAllTools } from './tools.js';
 
 const server = new McpServer({
   name: 'openbridge-mcp',
-  version: '2.1.0'
+  version: '2.2.0'
 });
 
 registerAllTools(server);

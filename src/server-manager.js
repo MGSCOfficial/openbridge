@@ -5,10 +5,6 @@ let spawnedProcess = null;
 let activeAuthPassword = CONFIG.serverPassword;
 let authWarningEmitted = false;
 
-// Token legacy de versiones <= 1.1.0-beta.1. Ya no se usa por defecto: solo se
-// acepta si el operador habilita OPENBRIDGE_ALLOW_LEGACY=1 durante la migración.
-const LEGACY_PASSWORD = 'openbridge_local_token_2026';
-
 function warnAuthOnce(message) {
   if (authWarningEmitted) return;
   authWarningEmitted = true;
@@ -51,34 +47,19 @@ export async function checkServerAuth(password = null) {
 }
 
 export async function ensureServerRunning() {
-  // 1. Check if server is already running with our active password
   const initialCheck = await checkServerAuth(activeAuthPassword);
   if (initialCheck.ok) {
     return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
   }
 
-  // 1b. Compatibilidad legacy: SOLO si se habilita explícitamente.
-  if (process.env.OPENBRIDGE_ALLOW_LEGACY === '1') {
-    const legacyCheck = await checkServerAuth(LEGACY_PASSWORD);
-    if (legacyCheck.ok) {
-      warnAuthOnce(
-        'Autenticando con el token legacy hardcodeado. Rota el daemon con OPENCODE_SERVER_PASSWORD y elimina OPENBRIDGE_ALLOW_LEGACY=1.'
-      );
-      activeAuthPassword = LEGACY_PASSWORD;
-      return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword };
-    }
-  }
-
-  // 2. If already alive on port (e.g. desktop app with auto-generated token)
   const alive = await isServerAlive();
   if (alive) {
     warnAuthOnce(
-      'El daemon responde pero rechaza el token configurado. Define OPENCODE_SERVER_PASSWORD con el token del daemon, o habilita OPENBRIDGE_ALLOW_LEGACY=1 temporalmente.'
+      'El daemon responde pero rechaza el token configurado. Reinicia el daemon con el token de ~/.openbridge/token o define OPENCODE_SERVER_PASSWORD.'
     );
     return { running: true, spawned: false, url: getBaseUrl(), password: activeAuthPassword, warning: 'Auth required' };
   }
 
-  // 3. Not running: spawn server process
   return new Promise((resolve, reject) => {
     const env = {
       ...process.env,
@@ -133,7 +114,6 @@ export async function ensureServerRunning() {
       }
     });
 
-    // Timeout fallback: poll /api/info for up to 10 seconds
     const interval = setInterval(async () => {
       if (resolved) {
         clearInterval(interval);

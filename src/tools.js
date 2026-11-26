@@ -52,6 +52,8 @@ export const TOOLS = [
     parameters: {
       task: z.string().describe('Instruccion o mensaje que debe procesarse en OpenCode'),
       model: z.string().optional().describe('Modelo objetivo en formato provider/model (opcional; si se omite usa OPENCODE_DEFAULT_MODEL o el activo en OpenCode)'),
+      agent: z.string().optional().describe('Agente opcional de OpenCode (ej. build, plan)'),
+      variant: z.string().optional().describe('Variante opcional de razonamiento del modelo (ej. default, high)'),
       session_id: z.string().optional().describe('ID de una sesion existente de OpenCode para continuar una conversacion multi-turno'),
       fallback_models: z.array(z.string()).optional().describe('Lista opcional de modelos de respaldo ante errores 429/5xx'),
       working_dir: z.string().optional().describe('Directorio absoluto de trabajo para OpenCode. Si se omite y read_only es true, opera en sandbox efimero.'),
@@ -62,8 +64,10 @@ export const TOOLS = [
     execute: async (args) => {
       try {
         const jobInfo = await jobManager.startJob(args);
-        const maxSyncMs = Math.min((args.timeout_seconds || 600) * 1000, 120000);
-        const outcome = await jobManager.waitForJob(jobInfo.jobId, maxSyncMs);
+        const totalTimeoutMs = (args.timeout_seconds || 600) * 1000;
+        const syncWindowMs = 120000;
+        const waitMs = totalTimeoutMs <= syncWindowMs ? totalTimeoutMs + 1000 : syncWindowMs;
+        const outcome = await jobManager.waitForJob(jobInfo.jobId, waitMs);
 
         if (outcome.done) {
           const j = outcome.job;
@@ -78,6 +82,8 @@ export const TOOLS = [
                     resumedSession: Boolean(j.resumedSession),
                     outcome: j.outcome,
                     modelUsed: j.modelUsed || j.model || 'opencode-default',
+                    agent: j.agent || null,
+                    variant: j.variant || null,
                     tokens: j.tokens,
                     cost: j.cost ?? null,
                     durationSeconds: j.durationSeconds,
@@ -93,6 +99,11 @@ export const TOOLS = [
           };
         }
 
+        if (totalTimeoutMs <= syncWindowMs) {
+          await jobManager.cancelJob(jobInfo.jobId).catch(() => {});
+          throw new Error(`Timeout tras ${args.timeout_seconds || Math.round(totalTimeoutMs / 1000)}s esperando respuesta sincrona.`);
+        }
+
         return {
           content: [
             {
@@ -103,7 +114,7 @@ export const TOOLS = [
                   jobId: jobInfo.jobId,
                   sessionID: jobInfo.sessionID,
                   model: jobInfo.model,
-                  elapsedSeconds: Math.round(maxSyncMs / 1000),
+                  elapsedSeconds: Math.round(syncWindowMs / 1000),
                   message: 'La tarea excedio la ventana sincrona de 120s y paso a segundo plano de forma segura. Monitorea o recolecta el resultado con openbridge_check_task.'
                 },
                 null,
@@ -126,6 +137,8 @@ export const TOOLS = [
     parameters: {
       task: z.string().describe('Instruccion o mensaje para la sesion en OpenCode'),
       model: z.string().optional().describe('Modelo objetivo en formato provider/model (opcional; si se omite usa OPENCODE_DEFAULT_MODEL o el activo en OpenCode)'),
+      agent: z.string().optional().describe('Agente opcional de OpenCode (ej. build, plan)'),
+      variant: z.string().optional().describe('Variante opcional de razonamiento del modelo (ej. default, high)'),
       session_id: z.string().optional().describe('ID de una sesion existente de OpenCode para continuar una conversacion multi-turno'),
       fallback_models: z.array(z.string()).optional().describe('Lista opcional de modelos de respaldo ante errores 429/5xx'),
       working_dir: z.string().optional().describe('Directorio absoluto de trabajo. Si se omite y read_only es true, opera en sandbox aislado.'),
@@ -169,20 +182,29 @@ export const TOOLS = [
   },
   {
     name: 'openbridge_cancel_task',
-    description: 'Cancela e interrumpe de forma limpia una tarea asincrona en curso.',
+    description: 'Cancela e interrumpe de forma limpia una tarea asincrona (por task_id) o cualquier sesion activa directa de OpenCode (por session_id).',
     parameters: {
-      task_id: z.string().describe('Identificador de la tarea a cancelar')
+      task_id: z.string().optional().describe('Identificador de la tarea OpenBridge (job_xxxxxxxx)'),
+      session_id: z.string().optional().describe('ID directo de sesion de OpenCode (ses_xxxxxxxx) para interrumpir incluso sesiones creadas fuera de OpenBridge')
     },
-    execute: async ({ task_id }) => {
+    execute: async ({ task_id, session_id }) => {
       try {
-        const res = await jobManager.cancelJob(task_id);
+        if (!task_id && !session_id) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'Error al cancelar: debes indicar task_id o session_id.' }]
+          };
+        }
+        const res = task_id
+          ? await jobManager.cancelJob(task_id)
+          : await jobManager.cancelSession(session_id);
         return {
           content: [{ type: 'text', text: JSON.stringify(res, null, 2) }]
         };
       } catch (err) {
         return {
           isError: true,
-          content: [{ type: 'text', text: `Error al cancelar tarea: ${err.message}` }]
+          content: [{ type: 'text', text: `Error al cancelar tarea/sesion: ${err.message}` }]
         };
       }
     }

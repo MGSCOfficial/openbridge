@@ -1,6 +1,6 @@
 {
   "name": "openbridge-mcp",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Decentralized MCP Bridge connecting MCP clients (such as Google Antigravity / Gemini) with any AI model and provider exposed by OpenCode",
   "main": "src/index.js",
   "type": "module",

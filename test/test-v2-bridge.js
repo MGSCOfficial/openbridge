@@ -18,8 +18,9 @@ const {
   clearModelHealth
 } = await import('../src/client.js');
 const { jobManager } = await import('../src/job-manager.js');
+const { TOOLS } = await import('../src/tools.js');
 
-console.log('=== TEST SUITE: PUENTE DESCENTRALIZADO OPENBRIDGE v2.0.0 ===\n');
+console.log('=== TEST SUITE: PUENTE DESCENTRALIZADO OPENBRIDGE v2.2.0 ===\n');
 console.log(`dataDir aislado: ${dataDir}\n`);
 
 async function testDecentralizedModelParsingAndListing() {
@@ -52,11 +53,12 @@ async function testDecentralizedModelParsingAndListing() {
     assert.strictEqual(ollamaModels.length, 1, 'Debe filtrar cualquier proveedor arbitrario como ollama');
     assert.strictEqual(ollamaModels[0].fullId, 'ollama/qwen3:32b');
 
-    await client.createSession({ model: 'openrouter/anthropic/claude-sonnet-5' });
+    await client.createSession({ model: 'openrouter/anthropic/claude-sonnet-5', agent: 'plan', variant: 'high' });
     await client.createSession({ model: 'ollama/qwen3:32b' });
     await client.createSession({ model: null });
 
-    assert.deepStrictEqual(capturedBodies[0].model, { providerID: 'openrouter', id: 'anthropic/claude-sonnet-5' });
+    assert.deepStrictEqual(capturedBodies[0].model, { providerID: 'openrouter', id: 'anthropic/claude-sonnet-5', variant: 'high' });
+    assert.strictEqual(capturedBodies[0].agent, 'plan');
     assert.deepStrictEqual(capturedBodies[1].model, { providerID: 'ollama', id: 'qwen3:32b' });
     assert.strictEqual(capturedBodies[2].model, undefined, 'Sin modelo especificado, OpenCode elige el suyo por defecto');
     console.log('  ✅ Multi-proveedor y parseo universal PASS.');
@@ -203,15 +205,18 @@ async function testPayloadSegregationAndManifest() {
 
   const root = process.cwd();
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
+  const mcpCfgPath = path.join(root, 'mcp_config.json');
+  assert.ok(fs.existsSync(mcpCfgPath), 'mcp_config.json debe existir en la raíz del plugin');
+  assert.ok(!fs.readFileSync(mcpCfgPath, 'utf8').includes('C:/Users/'), 'mcp_config.json no debe incluir rutas personales');
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const indexSource = fs.readFileSync(path.join(root, 'src', 'index.js'), 'utf8');
   const indexVersion = (indexSource.match(/version:\s*'([^']+)'/) || [])[1];
 
-  assert.strictEqual(manifest.version, '2.1.0');
-  assert.strictEqual(pkg.version, '2.1.0');
-  assert.strictEqual(indexVersion, '2.1.0');
+  assert.strictEqual(manifest.version, '2.2.0');
+  assert.strictEqual(pkg.version, '2.2.0');
+  assert.strictEqual(indexVersion, '2.2.0');
   assert.ok(!fs.existsSync(path.join(root, 'src', 'dashboard.js')), 'dashboard.js debe haber sido eliminado');
-  console.log('  ✅ Segregación y manifiesto v2.1.0 PASS.');
+  console.log('  ✅ Segregación y manifiesto v2.2.0 PASS.');
 }
 
 async function testUsageStatsAndRateLimitPropagation() {
@@ -323,7 +328,73 @@ async function testUsageStatsAndRateLimitPropagation() {
     assert.strictEqual(usage.recentProviderNotices[0].status, 429);
     assert.ok(usage.recentProviderNotices[0].resetsAtIso);
 
+    // 5d. recoverPendingJobs debe preservar providerError real (no ocultarlo tras RECOVERY_INCOMPLETE)
+    const recJobId = `job_rec_429_${Date.now()}`;
+    jobManager.jobs.set(recJobId, {
+      jobId: recJobId,
+      sessionID: 'ses_limit',
+      model: 'opencode/deepseek-v4.1-flash-free',
+      task: 'Recuperar fallo 429',
+      status: 'RUNNING',
+      startedAt: occurredAt - 1000,
+      afterTimestamp: occurredAt - 900
+    });
+    await jobManager.recoverPendingJobs();
+    const recoveredJob = jobManager.getJob(recJobId);
+    assert.strictEqual(recoveredJob.status, 'FAILED');
+    assert.ok(recoveredJob.providerError, 'recoverPendingJobs debe preservar providerError');
+    assert.strictEqual(recoveredJob.providerError.status, 429);
+
     console.log('  ✅ Telemetría de uso, errores de límite y hora de renovación PASS.');
+  } finally {
+    Object.assign(client, orig);
+  }
+}
+
+async function testSessionCancelAndShortTimeout() {
+  console.log('\n[TEST 6] Cancelación directa por session_id y timeout < 120s...');
+  const orig = {
+    interruptSession: client.interruptSession,
+    createSession: client.createSession,
+    sendPrompt: client.sendPrompt,
+    waitForCompletion: client.waitForCompletion
+  };
+  let interruptedSid = null;
+
+  try {
+    client.interruptSession = async (sid) => {
+      interruptedSid = sid;
+      return null;
+    };
+
+    const runningId = `job_cancel_sid_${Date.now()}`;
+    jobManager.jobs.set(runningId, {
+      jobId: runningId,
+      sessionID: 'ses_external_99',
+      status: 'RUNNING',
+      startedAt: Date.now()
+    });
+
+    const cancelTool = TOOLS.find((t) => t.name === 'openbridge_cancel_task');
+    const cancelRes = await cancelTool.execute({ session_id: 'ses_external_99' });
+    const cancelParsed = JSON.parse(cancelRes.content[0].text);
+    assert.strictEqual(interruptedSid, 'ses_external_99');
+    assert.strictEqual(cancelParsed.status, 'CANCELLED');
+    assert.strictEqual(jobManager.getJob(runningId).status, 'CANCELLED');
+
+    // Timeout corto (< 120s) no debe devolver falso HANDOFF_TO_ASYNC
+    client.createSession = async () => 'ses_short_to';
+    client.sendPrompt = async () => ({ id: 'm', time: { created: Date.now() } });
+    client.waitForCompletion = async () => new Promise(() => {}); // nunca resuelve
+
+    const delegateTool = TOOLS.find((t) => t.name === 'openbridge_delegate_task');
+    const shortRes = await delegateTool.execute({
+      task: 'Prueba timeout corto',
+      timeout_seconds: 0.05
+    });
+    assert.strictEqual(shortRes.isError, true, 'Timeout <= 120s debe fallar como error, nunca HANDOFF_TO_ASYNC');
+    assert.ok(!shortRes.content[0].text.includes('HANDOFF_TO_ASYNC'));
+    console.log('  ✅ Cancelación por session_id y timeout < 120s PASS.');
   } finally {
     Object.assign(client, orig);
   }
@@ -336,10 +407,11 @@ async function run() {
     await testMultiTurnAndSessionReading();
     await testPayloadSegregationAndManifest();
     await testUsageStatsAndRateLimitPropagation();
-    console.log('\n🎯 [100% PASS] OpenBridge v2.1.0 certificado como puente descentralizado.');
+    await testSessionCancelAndShortTimeout();
+    console.log('\n🎯 [100% PASS] OpenBridge v2.2.0 certificado como puente descentralizado.');
     process.exitCode = 0;
   } catch (err) {
-    console.error('\n❌ ERROR EN TEST v2.1.0:', err);
+    console.error('\n❌ ERROR EN TEST v2.2.0:', err);
     process.exitCode = 1;
   } finally {
     try {

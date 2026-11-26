@@ -25,10 +25,10 @@ Nunca asumas modelos fijos ni nombres de proveedores hardcodeados; consulta en t
 ## 2. HERRAMIENTAS DEL PUENTE (11 TOOLS)
 
 ### Ejecución y Enjambres
-- **`openbridge_delegate_task`**: Ejecución síncrona con Auto-Handoff preventivo a los `120s` (si tarda más, pasa a segundo plano retornando `jobId`). Soporta `session_id` para continuar conversaciones multi-turno y `fallback_models` opcional.
-- **`openbridge_start_task`**: Disparo asíncrono inmediato (`<50ms`) que retorna un `jobId` para paralelizar múltiples tareas sin bloquear el turno.
+- **`openbridge_delegate_task`**: Ejecución síncrona con Auto-Handoff preventivo a los `120s` (si tarda más, pasa a segundo plano retornando `jobId`). Soporta `agent`, `variant`, `session_id` para continuar conversaciones multi-turno y `fallback_models` opcional.
+- **`openbridge_start_task`**: Disparo asíncrono inmediato (`<50ms`) que retorna un `jobId` para paralelizar múltiples tareas sin bloquear el turno (soporta `agent`, `variant`, `session_id`).
 - **`openbridge_check_task`**: Consulta estado (`RUNNING`, `COMPLETED`, `FAILED`), resultado, tokens, coste reportado y diffs de un `jobId`.
-- **`openbridge_cancel_task`**: Interrumpe limpiamente una tarea en vuelo.
+- **`openbridge_cancel_task`**: Interrumpe limpiamente una tarea (`task_id`) o cualquier sesión activa de OpenCode (`session_id`).
 - **`openbridge_list_active_tasks`**: Lista jobs registrados localmente en OpenBridge.
 
 ### Sesiones Multi-Turno, Auditoría y Entorno

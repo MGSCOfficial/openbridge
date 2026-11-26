@@ -36,9 +36,9 @@ async function testP03DynamicAuth() {
   assert.strictEqual(fs.readFileSync(tokenFile, 'utf8').trim(), CONFIG.serverPassword);
 
   const source = fs.readFileSync(new URL('../src/server-manager.js', import.meta.url), 'utf8');
-  assert.ok(source.includes('OPENBRIDGE_ALLOW_LEGACY'), 'la ruta legacy debe estar gateada por env');
+  assert.ok(!source.includes('OPENBRIDGE_ALLOW_LEGACY'), 'el puente legacy debe haber sido retirado');
   const occurrences = (source.match(/openbridge_local_token_2026/g) || []).length;
-  assert.ok(occurrences <= 1, `el literal legacy aparece ${occurrences} veces; debe ser 1 (constante)`);
+  assert.strictEqual(occurrences, 0, 'el literal legacy ya no debe existir en server-manager.js');
 }
 
 async function testP04RecursionGuard() {
@@ -65,13 +65,14 @@ async function testP04RecursionGuard() {
 
 async function testP01JobPersistence() {
   const testJobId = `job_test_persist_${Date.now()}`;
+  const longPrompt = 'Prompt íntegro que debe sobrevivir al reinicio sin duplicarse en jobs.jsonl: ' + 'p'.repeat(400);
   jobManager.jobs.clear();
   jobManager.jobs.set(testJobId, {
     jobId: testJobId,
     sessionID: 'ses_mock_999',
     model: 'provider-a/model-alpha',
     task: 'Persistencia determinista JSONL',
-    promptText: 'Prompt íntegro que debe sobrevivir al reinicio',
+    promptText: longPrompt,
     status: 'COMPLETED',
     startedAt: Date.now() - 5000,
     completedAt: Date.now(),
@@ -84,8 +85,10 @@ async function testP01JobPersistence() {
   jobManager._saveJobs();
 
   assert.ok(fs.existsSync(CONFIG.jobsFile), 'jobs.jsonl debe existir');
-  const lines = fs.readFileSync(CONFIG.jobsFile, 'utf8').split('\n').filter((l) => l.trim());
+  const jobsContent = fs.readFileSync(CONFIG.jobsFile, 'utf8');
+  const lines = jobsContent.split('\n').filter((l) => l.trim());
   assert.ok(lines.some((l) => l.includes(testJobId)), 'el job debe estar en disco');
+  assert.ok(!jobsContent.includes(longPrompt), 'promptText largo NO debe duplicarse en jobs.jsonl');
 
   jobManager.jobs.clear();
   assert.strictEqual(jobManager.jobs.size, 0);
@@ -96,9 +99,9 @@ async function testP01JobPersistence() {
   assert.strictEqual(recovered.status, 'COMPLETED');
   assert.strictEqual(recovered.response, 'Respuesta persistida');
   assert.strictEqual(
-    jobManager.jobs.get(testJobId).promptText,
-    'Prompt íntegro que debe sobrevivir al reinicio',
-    'el prompt íntegro debe persistirse'
+    jobManager._getFullPrompt(jobManager.jobs.get(testJobId)),
+    longPrompt,
+    'el prompt íntegro debe recuperarse desde payloads/'
   );
 }
 

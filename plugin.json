@@ -1,8 +1,8 @@
 {
   "name": "openbridge",
   "displayName": "OpenBridge MCP",
-  "version": "2.1.0",
-  "description": "Decentralized MCP Bridge connecting Google Antigravity / Gemini with any AI provider and model available in OpenCode, with SSE streaming, multi-turn session continuity and background tasks.",
+  "version": "2.2.0",
+  "description": "Decentralized MCP Bridge connecting Google Antigravity / Gemini with any AI provider and model available in OpenCode, with SSE streaming, multi-turn session continuity and usage telemetry.",
   "author": {
     "name": "MGSCO",
     "url": "https://github.com/MGSCOfficial"
@@ -11,16 +11,5 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/MGSCOfficial/openbridge.git"
-  },
-  "license": "MIT",
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "antigravity",
-    "opencode",
-    "ai-bridge",
-    "multi-provider",
-    "ai-agents"
-  ],
-  "mcpConfig": "./openbridge-mcp-config.json"
+  }
 }
